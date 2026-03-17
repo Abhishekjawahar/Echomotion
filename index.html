@@ -3,249 +3,138 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>EchoMotion - Production</title>
+<title>EchoMotion</title>
 <style>
-  body { margin:0; background:#000; color:#fff; font-family:sans-serif; overflow:hidden; }
-  canvas { display:block; }
-  #ui {
-    position:fixed; top:10px; left:10px; z-index:10;
-    background:rgba(0,0,0,0.6); backdrop-filter: blur(6px);
-    padding:12px; border-radius:12px; width:280px;
-  }
-  .row { display:flex; gap:8px; }
-  label { font-size:12px; display:block; margin-top:8px; }
-  input, select, button { width:100%; }
-  button { cursor:pointer; }
+  body{margin:0;background:#050505;color:#eee;font-family:system-ui;overflow:hidden}
+  canvas{display:block}
+  #ui{position:fixed;top:12px;left:12px;z-index:10;background:rgba(20,20,20,0.7);backdrop-filter:blur(10px);padding:14px;border-radius:14px;width:300px}
+  .row{display:flex;gap:8px}
+  input,select,button{width:100%;margin-top:6px}
 </style>
 </head>
 <body>
-
 <video id="video" autoplay playsinline muted style="display:none"></video>
 <canvas id="canvas"></canvas>
 
 <div id="ui">
-  <b>EchoMotion</b>
-
-  <div class="row">
-    <button id="camBtn">Camera</button>
-    <button id="vidBtn">Video</button>
-  </div>
-  <input type="file" id="fileInput" accept="video/*" style="display:none" />
-
-  <label>Sensitivity <input type="range" id="sensitivity" min="10" max="80" value="40"></label>
-  <label>Min Blob Size <input type="range" id="minSize" min="20" max="500" value="120"></label>
-  <label>Trail Length <input type="range" id="trail" min="2" max="30" value="12"></label>
-
-  <label>BPM <input type="range" id="bpm" min="60" max="140" value="90"></label>
-
-  <label>Overlay
-    <select id="overlay">
-      <option value="none">None</option>
-      <option value="hull">Convex Hull</option>
-      <option value="delaunay">Delaunay</option>
-      <option value="voronoi">Voronoi</option>
-    </select>
-  </label>
-
-  <div class="row">
-    <button id="recBtn">Start Rec</button>
-    <button id="dlBtn" disabled>Download</button>
-  </div>
+<b>EchoMotion</b>
+<div class="row">
+<button id="front">Front</button>
+<button id="back">Back</button>
+</div>
+<button id="upload">Upload</button>
+<input type="file" id="file" accept="video/*" style="display:none">
+<label>Sensitivity <input id="sens" type="range" min="10" max="80" value="40"></label>
+<label>Min Blob <input id="min" type="range" min="20" max="400" value="120"></label>
+<label>Trail <input id="trail" type="range" min="2" max="30" value="12"></label>
+<label>BPM <input id="bpm" type="range" min="60" max="140" value="90"></label>
+<label>Overlay <select id="overlay"><option value="none">None</option><option value="hull">Hull</option><option value="mesh">Mesh</option><option value="cells">Cells</option></select></label>
+<div class="row"><button id="rec">Record</button><button id="dl" disabled>Download</button></div>
 </div>
 
 <script>
-const video = document.getElementById('video');
-const canvas = document.getElementById('canvas');
-const ctx = canvas.getContext('2d');
+const v=document.getElementById('video');
+const c=document.getElementById('canvas');
+const x=c.getContext('2d');
+let W,H;function resize(){W=c.width=innerWidth;H=c.height=innerHeight;}onresize=resize;resize();
 
-let W,H; function resize(){ W=canvas.width=innerWidth; H=canvas.height=innerHeight; } window.onresize=resize; resize();
+// INPUT
+let stream=null;
+async function cam(mode){if(stream)stream.getTracks().forEach(t=>t.stop());stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:mode}});v.srcObject=stream;}
+front.onclick=()=>cam('user');
+back.onclick=()=>cam('environment');
+upload.onclick=()=>file.click();
+file.onchange=e=>{if(stream)stream.getTracks().forEach(t=>t.stop());v.srcObject=null;v.src=URL.createObjectURL(e.target.files[0]);v.play();};
 
-// INPUT TOGGLE (OR, not AND)
-const camBtn = document.getElementById('camBtn');
-const vidBtn = document.getElementById('vidBtn');
-const fileInput = document.getElementById('fileInput');
+// ASPECT CORRECT DRAW
+function drawVideo(){const vw=v.videoWidth,vh=v.videoHeight;if(!vw)return null;const s=Math.min(W/vw,H/vh);const w=vw*s,h=vh*s;const ox=(W-w)/2,oy=(H-h)/2;x.drawImage(v,ox,oy,w,h);return{ox,oy,w,h};}
 
-let currentStream = null;
-
-camBtn.onclick = async ()=>{
-  if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
-  const s = await navigator.mediaDevices.getUserMedia({video:true});
-  currentStream = s;
-  video.srcObject = s;
-};
-
-vidBtn.onclick = ()=> fileInput.click();
-fileInput.onchange = e=>{
-  const f = e.target.files[0];
-  if(f){
-    if(currentStream){ currentStream.getTracks().forEach(t=>t.stop()); }
-    video.srcObject = null;
-    video.src = URL.createObjectURL(f);
-    video.play();
-  }
-};
-
-// MOTION + BLOBS
-let prevFrame, blobsPrev=[], idCounter=0;
-
+// ORIGINAL STYLE BLOB ENGINE (grouped regions)
+let prevFrame, prevBlobs=[], idc=0;
 function getBlobs(){
-  ctx.drawImage(video,0,0,W,H);
-  const frame=ctx.getImageData(0,0,W,H);
-  const blobs=[], visited=new Uint8Array(W*H);
-  const threshold=+document.getElementById('sensitivity').value;
-  const idx=(x,y)=>y*W+x;
-
-  if(prevFrame){
-    for(let y=0;y<H;y+=2){
-      for(let x=0;x<W;x+=2){
-        let i=(y*W+x)*4;
-        if(Math.abs(frame.data[i]-prevFrame.data[i])>threshold && !visited[idx(x,y)]){
-          let stack=[[x,y]], pts=[];
-          while(stack.length){
-            let [sx,sy]=stack.pop();
-            if(sx<0||sy<0||sx>=W||sy>=H) continue;
-            let id=idx(sx,sy);
-            if(visited[id]) continue;
-            let si=(sy*W+sx)*4;
-            if(Math.abs(frame.data[si]-prevFrame.data[si])<threshold) continue;
-            visited[id]=1; pts.push([sx,sy]);
-            stack.push([sx+2,sy],[sx-2,sy],[sx,sy+2],[sx,sy-2]);
-          }
-          if(pts.length>+document.getElementById('minSize').value){
-            let cx=0,cy=0; pts.forEach(p=>{cx+=p[0];cy+=p[1];});
-            blobs.push({cx:cx/pts.length, cy:cy/pts.length, pts});
-          }
-        }
-      }
+ const frame=x.getImageData(0,0,W,H);
+ const blobs=[],vis=new Uint8Array(W*H);
+ const th=+sens.value;
+ const idx=(x,y)=>y*W+x;
+ if(prevFrame){
+  for(let y=0;y<H;y+=2){
+   for(let x0=0;x0<W;x0+=2){
+    let i=(y*W+x0)*4;
+    if(Math.abs(frame.data[i]-prevFrame.data[i])>th && !vis[idx(x0,y)]){
+     let stack=[[x0,y]],pts=[];
+     while(stack.length){
+      let [sx,sy]=stack.pop();
+      if(sx<0||sy<0||sx>=W||sy>=H)continue;
+      let id=idx(sx,sy);
+      if(vis[id])continue;
+      let si=(sy*W+sx)*4;
+      if(Math.abs(frame.data[si]-prevFrame.data[si])<th)continue;
+      vis[id]=1;pts.push([sx,sy]);
+      stack.push([sx+2,sy],[sx-2,sy],[sx,sy+2],[sx,sy-2]);
+     }
+     if(pts.length>+min.value){
+      let cx=0,cy=0;pts.forEach(p=>{cx+=p[0];cy+=p[1];});
+      blobs.push({cx:cx/pts.length,cy:cy/pts.length,pts});
+     }
     }
+   }
   }
-  prevFrame=frame; return blobs;
+ }
+ prevFrame=frame;return blobs;
 }
 
 function track(blobs){
-  blobs.forEach(b=>{
-    let best=null, dmin=1e9;
-    blobsPrev.forEach(p=>{
-      let d=Math.hypot(b.cx-p.cx,b.cy-p.cy);
-      if(d<dmin && d<50){ dmin=d; best=p; }
-    });
-    if(best){ b.id=best.id; b.v=Math.hypot(b.cx-best.cx,b.cy-best.cy); }
-    else { b.id=idCounter++; b.v=0; }
+ blobs.forEach(b=>{
+  let best=null,dmin=1e9;
+  prevBlobs.forEach(p=>{
+   let d=Math.hypot(b.cx-p.cx,b.cy-p.cy);
+   if(d<dmin&&d<60){dmin=d;best=p;}
   });
-  blobsPrev=blobs;
+  if(best){b.id=best.id;b.v=Math.hypot(b.cx-best.cx,b.cy-best.cy);} else{b.id=idc++;b.v=0;}
+ });
+ prevBlobs=blobs;
 }
 
-// AUDIO
-const audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-const scale=[0,2,4,7,9];
-function midiToFreq(m){return 440*Math.pow(2,(m-69)/12);}
-function play(freq,vol){
-  const o=audioCtx.createOscillator();
-  const g=audioCtx.createGain();
-  o.type='triangle'; o.frequency.value=freq;
-  g.gain.setValueAtTime(0,audioCtx.currentTime);
-  g.gain.linearRampToValueAtTime(vol,audioCtx.currentTime+0.01);
-  g.gain.exponentialRampToValueAtTime(0.001,audioCtx.currentTime+0.6);
-  o.connect(g); g.connect(audioCtx.destination);
-  o.start(); o.stop(audioCtx.currentTime+0.7);
+// OVERLAYS (restored properly)
+function hull(b){if(b.length<3)return;x.strokeStyle='yellow';x.beginPath();b.forEach((p,i)=>i?x.lineTo(p.cx,p.cy):x.moveTo(p.cx,p.cy));x.closePath();x.stroke();}
+function mesh(b){x.strokeStyle='lime';b.forEach(a=>b.forEach(d=>{if(a!==d){x.beginPath();x.moveTo(a.cx,a.cy);x.lineTo(d.cx,d.cy);x.stroke();}}));}
+function cells(b){x.fillStyle='cyan';b.forEach(a=>{x.beginPath();x.arc(a.cx,a.cy,2,0,6.28);x.fill();});}
+
+// AUDIO (ambient + harmonic reaction)
+const actx=new AudioContext();
+let baseOsc=actx.createOscillator();
+let baseGain=actx.createGain();
+baseOsc.type='sine';baseOsc.frequency.value=110;baseGain.gain.value=0.1;baseOsc.connect(baseGain).connect(actx.destination);baseOsc.start();
+
+function react(blobs){
+ if(!blobs.length)return;
+ let avg=blobs.reduce((a,b)=>a+b.v,0)/blobs.length;
+ baseOsc.frequency.setTargetAtTime(90+avg,actx.currentTime,0.1);
+ baseGain.gain.setTargetAtTime(Math.min(0.3,avg/200),actx.currentTime,0.1);
 }
 
-let lastBeat=0;
-function audio(blobs){
-  let bpm=+document.getElementById('bpm').value;
-  let now=performance.now();
-  if(now-lastBeat<60000/bpm) return;
-  lastBeat=now;
-
-  blobs.slice(0,4).forEach(b=>{
-    let base=48+scale[Math.floor((b.cx/W)*scale.length)];
-    [0,4,7].forEach(h=>{
-      let vol=Math.min(1,b.v/20)*0.2;
-      play(midiToFreq(base+h), vol);
-    });
-  });
-}
-
-// RECORDING
-let mediaRecorder, recordedChunks=[];
-const recBtn=document.getElementById('recBtn');
-const dlBtn=document.getElementById('dlBtn');
-
-recBtn.onclick=()=>{
-  if(!mediaRecorder){
-    const stream=canvas.captureStream(30);
-    mediaRecorder=new MediaRecorder(stream);
-    mediaRecorder.ondataavailable=e=>recordedChunks.push(e.data);
-    mediaRecorder.onstop=()=> dlBtn.disabled=false;
-    mediaRecorder.start();
-    recBtn.innerText="Stop Rec";
-  } else {
-    mediaRecorder.stop();
-    mediaRecorder=null;
-    recBtn.innerText="Start Rec";
-  }
+// RECORD
+let rec,chunks=[];
+rec.onclick=()=>{
+ if(!rec._on){rec._on=true;rec.innerText='Stop';rec._mr=new MediaRecorder(c.captureStream(30));rec._mr.ondataavailable=e=>chunks.push(e.data);rec._mr.onstop=()=>dl.disabled=false;rec._mr.start();}
+ else{rec._on=false;rec.innerText='Record';rec._mr.stop();}
 };
+dl.onclick=()=>{let b=new Blob(chunks);let a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='echomotion.webm';a.click();};
 
-dlBtn.onclick=()=>{
-  const blob=new Blob(recordedChunks,{type:'video/webm'});
-  const url=URL.createObjectURL(blob);
-  const a=document.createElement('a');
-  a.href=url; a.download='echomotion.webm'; a.click();
-};
-
-// OVERLAYS
-function drawHull(blobs){
-  if(blobs.length<3) return;
-  ctx.strokeStyle='yellow'; ctx.beginPath();
-  blobs.forEach((b,i)=> i?ctx.lineTo(b.cx,b.cy):ctx.moveTo(b.cx,b.cy));
-  ctx.closePath(); ctx.stroke();
-}
-function drawDelaunay(blobs){
-  ctx.strokeStyle='lime';
-  blobs.forEach(a=> blobs.forEach(b=>{ if(a!==b){ ctx.beginPath(); ctx.moveTo(a.cx,a.cy); ctx.lineTo(b.cx,b.cy); ctx.stroke(); }}));
-}
-function drawVoronoi(blobs){
-  ctx.strokeStyle='cyan';
-  blobs.forEach(a=> blobs.forEach(b=>{ if(a!==b){ let mx=(a.cx+b.cx)/2; let my=(a.cy+b.cy)/2; ctx.beginPath(); ctx.arc(mx,my,2,0,Math.PI*2); ctx.stroke(); }}));
-}
-
+// DRAW
 let history=[];
-function updateHistory(blobs){
-  history.push(blobs.map(b=>({x:b.cx,y:b.cy})));
-  if(history.length>+document.getElementById('trail').value) history.shift();
-}
-
 function draw(blobs){
-  // draw raw video FIRST (fix)
-  ctx.drawImage(video,0,0,W,H);
-
-  // trails
-  ctx.strokeStyle='rgba(0,255,255,0.3)';
-  history.forEach(f=>{ctx.beginPath(); f.forEach(p=>ctx.lineTo(p.x,p.y)); ctx.stroke();});
-
-  // blobs
-  blobs.forEach(b=>{
-    ctx.fillStyle=`hsl(${b.id*50%360},100%,60%)`;
-    ctx.beginPath(); ctx.arc(b.cx,b.cy,6,0,Math.PI*2); ctx.fill();
-  });
-
-  let mode=document.getElementById('overlay').value;
-  if(mode==='hull') drawHull(blobs);
-  if(mode==='delaunay') drawDelaunay(blobs);
-  if(mode==='voronoi') drawVoronoi(blobs);
+ x.clearRect(0,0,W,H);
+ drawVideo();
+ history.push(blobs.map(b=>({x:b.cx,y:b.cy})));
+ if(history.length>+trail.value)history.shift();
+ x.strokeStyle='rgba(0,255,255,0.3)';
+ history.forEach(f=>{x.beginPath();f.forEach(p=>x.lineTo(p.x,p.y));x.stroke();});
+ blobs.forEach(b=>{x.fillStyle=`hsl(${b.id*60%360},100%,60%)`;x.beginPath();x.arc(b.cx,b.cy,6,0,6.28);x.fill();});
+ let m=overlay.value;if(m==='hull')hull(blobs);if(m==='mesh')mesh(blobs);if(m==='cells')cells(blobs);
 }
 
-function loop(){
-  requestAnimationFrame(loop);
-  if(video.readyState<2) return;
-  let blobs=getBlobs();
-  track(blobs);
-  updateHistory(blobs);
-  draw(blobs);
-  audio(blobs);
-}
-loop();
+function loop(){requestAnimationFrame(loop);if(v.readyState<2)return;drawVideo();let b=getBlobs();track(b);draw(b);react(b);}loop();
 </script>
-
 </body>
 </html>
