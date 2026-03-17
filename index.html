@@ -2,230 +2,1410 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EchoMotion - Advanced</title>
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+<title>BlobTracker</title>
 <style>
-body{margin:0;background:#000;color:#fff;font-family:sans-serif;overflow:hidden}
-#wrap{position:relative;width:100vw;height:100vh}
-canvas{position:absolute;top:0;left:0;width:100%;height:100%}
-#ui{position:absolute;bottom:20px;left:50%;transform:translateX(-50%);
-background:rgba(0,0,0,0.5);backdrop-filter:blur(10px);
-padding:10px 14px;border-radius:12px;display:flex;gap:10px;flex-wrap:wrap}
-button,input{padding:6px 10px;border-radius:6px;border:none}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: #0f0f11;
+  color: #f0f0f2;
+  font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+header {
+  padding: 12px 16px 10px;
+  border-bottom: 1px solid #2a2a30;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+header h1 { font-size: 20px; font-weight: 700; }
+header h1 span { color: #4f8ef7; }
+.badge {
+  background: #1a2d55; color: #4f8ef7;
+  font-size: 10px; font-weight: 700;
+  padding: 2px 7px; border-radius: 4px;
+}
+#fps-label { color: #80808a; font-size: 12px; margin-left: auto; }
+
+.app { display: flex; flex-direction: column; height: calc(100vh - 47px); }
+
+.video-wrap {
+  position: relative; background: #000;
+  flex: 1; min-height: 0;
+}
+video, canvas#overlay {
+  position: absolute; top: 0; left: 0;
+  width: 100%; height: 100%;
+  object-fit: contain; display: block;
+}
+video { position: relative; }
+canvas#overlay { pointer-events: none; }
+
+.blob-badge {
+  position: absolute; top: 10px; left: 12px;
+  background: rgba(0,0,0,0.6);
+  border: 1px solid #2a2a30; border-radius: 8px;
+  padding: 5px 10px; font-size: 13px;
+  font-weight: 600; color: #00ff88;
+}
+/* Sound status indicator */
+.sound-badge {
+  position: absolute; top: 10px; left: 50%;
+  transform: translateX(-50%);
+  background: rgba(0,0,0,0.6);
+  border: 1px solid #2a2a30; border-radius: 8px;
+  padding: 5px 10px; font-size: 12px;
+  font-weight: 600; color: #80808a;
+  display: flex; align-items: center; gap: 6px;
+  white-space: nowrap;
+}
+.sound-badge.active { color: #bb88ff; border-color: #bb88ff44; }
+.sound-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #80808a; flex-shrink: 0;
+}
+.sound-badge.active .sound-dot {
+  background: #bb88ff;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+@keyframes pulse { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:0.5;transform:scale(0.7)} }
+
+.rec-badge {
+  position: absolute; top: 10px; right: 12px;
+  background: rgba(255,69,58,0.85); border-radius: 8px;
+  padding: 5px 10px; font-size: 12px; font-weight: 700;
+  color: #fff; display: none; align-items: center; gap: 6px;
+}
+.rec-badge.active { display: flex; }
+.rec-dot {
+  width: 8px; height: 8px; background: #fff;
+  border-radius: 50%; animation: blink 1s infinite;
+}
+@keyframes blink { 0%,100%{opacity:1} 50%{opacity:0} }
+
+/* Pitch visualiser bar (per-blob) */
+.pitch-overlay {
+  position: absolute; bottom: 8px; left: 12px; right: 12px;
+  display: flex; gap: 4px; align-items: flex-end; height: 32px;
+  pointer-events: none;
+}
+.pitch-bar {
+  flex: 1; border-radius: 3px 3px 0 0;
+  background: rgba(187,136,255,0.55);
+  transition: height 0.08s ease;
+  min-height: 3px;
+}
+
+.controls {
+  background: #131316; border-top: 1px solid #2a2a30;
+  padding: 10px 12px; display: flex;
+  flex-direction: column; gap: 10px;
+  overflow-y: auto; max-height: 54vh;
+}
+.btn-row { display: flex; gap: 7px; flex-wrap: wrap; }
+button {
+  flex: 1; padding: 9px 6px;
+  border: none; border-radius: 10px;
+  font-size: 12px; font-weight: 600;
+  cursor: pointer; transition: opacity 0.15s;
+  font-family: inherit; min-width: 60px;
+}
+button:active { opacity: 0.75; }
+
+.btn-src     { background:#1a2d55; color:#4f8ef7; border:1px solid #4f8ef7; }
+.btn-src.off { background:#1e1e24; color:#c0c0cc; border:1px solid #35353f; }
+.btn-cam-f   { background:#1e1e24; color:#c0c0cc; border:1px solid #35353f; }
+.btn-cam-f.active { background:#1a2d55; color:#4f8ef7; border-color:#4f8ef7; }
+.btn-cam-b   { background:#1e1e24; color:#c0c0cc; border:1px solid #35353f; }
+.btn-cam-b.active { background:#1a2d55; color:#4f8ef7; border-color:#4f8ef7; }
+.btn-record  { background:#0d2e14; color:#2dce6e; border:1px solid #2dce6e; }
+.btn-record.recording { background:#3d1210; color:#ff453a; border-color:#ff453a; }
+.btn-download { background:#1e1e24; color:#80808a; border:1px solid #35353f; }
+.btn-download.ready { background:#0d2040; color:#4f8ef7; border-color:#4f8ef7; }
+
+/* Sound toggle button */
+.btn-sound     { background:#1a0d2e; color:#bb88ff; border:1px solid #bb88ff; }
+.btn-sound.off { background:#1e1e24; color:#80808a; border:1px solid #35353f; }
+
+.section-title {
+  font-size: 10px; font-weight: 700;
+  letter-spacing: 1.4px; color: #80808a;
+  text-transform: uppercase; margin-bottom: 2px;
+}
+.slider-row { display: flex; flex-direction: column; gap: 6px; }
+.slider-item { display: flex; align-items: center; gap: 8px; }
+.slider-label { font-size: 11px; color: #c0c0cc; width: 120px; flex-shrink: 0; }
+input[type=range] { flex:1; height:4px; accent-color:#4f8ef7; cursor:pointer; }
+.slider-val { font-size:11px; font-weight:700; color:#4f8ef7; width:36px; text-align:right; flex-shrink:0; }
+/* Purple accent for sound sliders */
+.sound-slider input[type=range] { accent-color:#bb88ff; }
+.sound-slider .slider-val { color:#bb88ff; }
+
+.toggle-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; }
+.tog {
+  background: #1e1e24; border: 1px solid #35353f;
+  border-radius: 8px; padding: 7px 8px;
+  font-size: 11px; color: #80808a;
+  text-align: left; cursor: pointer;
+  transition: all 0.15s; flex: unset;
+}
+.tog.on { border-color: currentColor; }
+.tog.on.hull   { color:#ff8844; background:#1a0a00; }
+.tog.on.voro   { color:#bb88ff; background:#150a22; }
+.tog.on.force  { color:#00cfff; background:#001a22; }
+.tog.on.lissa  { color:#00ff88; background:#001a0d; }
+.tog.on.dela   { color:#ffaa00; background:#1a1100; }
+.tog.on.fourier{ color:#ff88cc; background:#1a0011; }
+.tog.on.rdiff  { color:#88ffcc; background:#001a11; }
+
+/* Scale selector */
+.scale-select {
+  background: #1e1e24; border: 1px solid #35353f;
+  border-radius: 8px; padding: 8px 10px;
+  color: #bb88ff; font-size: 12px; font-weight: 600;
+  font-family: inherit; cursor: pointer; width: 100%;
+  outline: none;
+}
+.scale-select:focus { border-color: #bb88ff55; }
+
+/* Note name display */
+.note-display {
+  display: flex; gap: 5px; flex-wrap: wrap; margin-top: 4px;
+}
+.note-chip {
+  background: #1a0d2e; border: 1px solid #bb88ff33;
+  border-radius: 5px; padding: 3px 8px;
+  font-size: 10px; font-weight: 700; color: #bb88ff88;
+  transition: all 0.12s;
+}
+.note-chip.lit {
+  color: #bb88ff; background: #2a1050;
+  border-color: #bb88ff66;
+}
+
+.upload-area {
+  border: 1.5px dashed #35353f; border-radius: 10px;
+  padding: 12px; text-align: center;
+  color: #80808a; font-size: 12px; cursor: pointer;
+  transition: border-color 0.2s;
+}
+.upload-area:hover { border-color: #4f8ef7; color: #4f8ef7; }
+.upload-area.has-file { border-color: #2dce6e; color: #2dce6e; }
+input[type=file] { display: none; }
 </style>
 </head>
 <body>
-<div id="wrap">
-<video id="video" autoplay playsinline muted style="display:none"></video>
-<canvas id="canvas"></canvas>
-<div id="ui">
-<button id="front">Front</button>
-<button id="back">Back</button>
-<input type="file" id="file" accept="video/*">
-<button id="rec">Rec</button>
-<button id="stop">Stop</button>
+
+<header>
+  <h1>BLOB<span>TRACKER</span></h1>
+  <span class="badge">v12</span>
+  <span id="fps-label">— fps</span>
+</header>
+
+<div class="app">
+  <div class="video-wrap">
+    <video id="vid" autoplay playsinline muted></video>
+    <canvas id="overlay"></canvas>
+    <div class="blob-badge" id="blob-badge">0 blobs</div>
+    <div class="sound-badge" id="sound-badge">
+      <div class="sound-dot"></div>
+      <span id="sound-label">Sound off</span>
+    </div>
+    <div class="rec-badge" id="rec-badge">
+      <div class="rec-dot"></div> REC
+    </div>
+    <div class="pitch-overlay" id="pitch-overlay"></div>
+  </div>
+
+  <div class="controls">
+
+    <!-- Source toggle row -->
+    <div class="btn-row">
+      <button class="btn-src" id="btn-cam-src" onclick="setSource('camera')">📷 Camera</button>
+      <button class="btn-src off" id="btn-file-src" onclick="setSource('file')">🎬 Video File</button>
+    </div>
+
+    <!-- Camera controls -->
+    <div id="cam-controls" class="btn-row">
+      <button class="btn-cam-f active" id="btn-front" onclick="switchCamera('user')">Front</button>
+      <button class="btn-cam-b" id="btn-back"  onclick="switchCamera('environment')">Back</button>
+      <button class="btn-record" id="btn-record" onclick="toggleRecord()">⏺ Record</button>
+      <button class="btn-download" id="btn-download" onclick="downloadRecording()">⬇ Save</button>
+    </div>
+
+    <!-- File upload area -->
+    <div id="file-controls" style="display:none">
+      <div class="upload-area" id="upload-area" onclick="document.getElementById('file-input').click()">
+        <div id="upload-label">Tap to select a video file</div>
+      </div>
+      <input type="file" id="file-input" accept="video/*" onchange="loadVideoFile(this)">
+    </div>
+
+    <!-- Detection sliders -->
+    <div>
+      <div class="section-title">Detection</div>
+      <div class="slider-row">
+        <div class="slider-item">
+          <span class="slider-label">Sensitivity</span>
+          <input type="range" min="1" max="50" value="15"
+                 oninput="sliders.sensitivity=+this.value;document.getElementById('v-sens').textContent=this.value">
+          <span class="slider-val" id="v-sens">15</span>
+        </div>
+        <div class="slider-item">
+          <span class="slider-label">Min blob (px²)</span>
+          <input type="range" min="0" max="3000" value="200" step="50"
+                 oninput="sliders.minsize=+this.value;document.getElementById('v-min').textContent=this.value">
+          <span class="slider-val" id="v-min">200</span>
+        </div>
+        <div class="slider-item">
+          <span class="slider-label">Max blob (px²)</span>
+          <input type="range" min="500" max="30000" value="15000" step="500"
+                 oninput="sliders.maxsize=+this.value;document.getElementById('v-max').textContent=this.value">
+          <span class="slider-val" id="v-max">15000</span>
+        </div>
+        <div class="slider-item" id="speed-row" style="display:none">
+          <span class="slider-label">Playback speed</span>
+          <input type="range" min="0.1" max="2" value="1" step="0.1"
+                 oninput="setPlaybackSpeed(+this.value);document.getElementById('v-spd').textContent=this.value+'x'">
+          <span class="slider-val" id="v-spd">1x</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════════════════════════════════ -->
+    <!-- SOUND SECTION                               -->
+    <!-- ═══════════════════════════════════════════ -->
+    <div>
+      <div class="section-title">Sound</div>
+      <div class="btn-row" style="margin-bottom:8px">
+        <button class="btn-sound off" id="btn-sound" onclick="toggleSound()">🔇 Sound Off</button>
+      </div>
+
+      <!-- Scale picker -->
+      <div style="margin-bottom:8px">
+        <select class="scale-select" id="scale-select" onchange="onScaleChange()">
+          <option value="penta_minor">Pentatonic Minor  (A C D E G)</option>
+          <option value="penta_major">Pentatonic Major  (C D E G A)</option>
+          <option value="whole_tone">Whole Tone        (C D E F# G# A#)</option>
+          <option value="minor">Natural Minor     (A B C D E F G)</option>
+          <option value="major">Major             (C D E F G A B)</option>
+          <option value="chromatic">Chromatic         (all 12)</option>
+        </select>
+        <div class="note-display" id="note-display"></div>
+      </div>
+
+      <!-- Sound sliders -->
+      <div class="slider-row">
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Drone volume</span>
+          <input type="range" min="0" max="100" value="60" id="sl-drone-vol"
+                 oninput="soundParams.droneVol=+this.value/100; updateDrone(); document.getElementById('v-drone-vol').textContent=this.value">
+          <span class="slider-val" id="v-drone-vol">60</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Pitch range (oct)</span>
+          <input type="range" min="1" max="4" value="2" step="1" id="sl-pitch-range"
+                 oninput="soundParams.pitchOctaves=+this.value; document.getElementById('v-pitch-range').textContent=this.value">
+          <span class="slider-val" id="v-pitch-range">2</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Vol sensitivity</span>
+          <input type="range" min="1" max="10" value="5" id="sl-vol-sens"
+                 oninput="soundParams.volSens=+this.value; document.getElementById('v-vol-sens').textContent=this.value">
+          <span class="slider-val" id="v-vol-sens">5</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Attack / Release</span>
+          <input type="range" min="1" max="20" value="8" id="sl-attack"
+                 oninput="soundParams.attack=+this.value/10; document.getElementById('v-attack').textContent=(+this.value/10).toFixed(1)+'s'">
+          <span class="slider-val" id="v-attack">0.8s</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Filter (Y base)</span>
+          <input type="range" min="100" max="8000" value="1200" step="100" id="sl-filter"
+                 oninput="soundParams.filterBase=+this.value; document.getElementById('v-filter').textContent=this.value+'Hz'">
+          <span class="slider-val" id="v-filter">1200Hz</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Reverb mix</span>
+          <input type="range" min="0" max="100" value="35" id="sl-reverb"
+                 oninput="soundParams.reverbMix=+this.value/100; updateReverbMix(); document.getElementById('v-reverb').textContent=this.value+'%'">
+          <span class="slider-val" id="v-reverb">35%</span>
+        </div>
+        <div class="slider-item sound-slider">
+          <span class="slider-label">Distortion</span>
+          <input type="range" min="0" max="100" value="0" id="sl-dist"
+                 oninput="soundParams.distortion=+this.value/100; document.getElementById('v-dist').textContent=this.value+'%'">
+          <span class="slider-val" id="v-dist">0%</span>
+        </div>
+      </div>
+    </div>
+    <!-- END SOUND SECTION -->
+
+    <!-- Overlays -->
+    <div>
+      <div class="section-title">Overlays</div>
+      <div class="toggle-grid">
+        <button class="tog hull"    id="tog-hull"    onclick="toggleOv('hull')">🟤 Convex hull</button>
+        <button class="tog voro"    id="tog-voro"    onclick="toggleOv('voro')">🟣 Voronoi</button>
+        <button class="tog force"   id="tog-force"   onclick="toggleOv('force')">🔵 Force field</button>
+        <button class="tog lissa"   id="tog-lissa"   onclick="toggleOv('lissa')">🟢 Lissajous</button>
+        <button class="tog dela"    id="tog-dela"    onclick="toggleOv('dela')">🟠 Delaunay</button>
+        <button class="tog fourier" id="tog-fourier" onclick="toggleOv('fourier')">🩷 Fourier rings</button>
+        <button class="tog rdiff"   id="tog-rdiff"   onclick="toggleOv('rdiff')">🩵 Reaction diff</button>
+      </div>
+    </div>
+
+  </div>
 </div>
-</div>
+
 <script>
-const video=document.getElementById('video');
-const canvas=document.getElementById('canvas');
-const ctx=canvas.getContext('2d');
-let stream=null,prev=null;
+// ─── CONSTANTS ───────────────────────────────
+const TRAIL_LEN    = 300;
+const TRAIL_COLOR  = '#00ff88';
+const OVERLAP_COL  = '#ff453a';
+const MAX_VOICES   = 6; // max simultaneous blob voices
 
-function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
-window.onresize=resize;resize();
-
-async function cam(mode){
- if(stream) stream.getTracks().forEach(t=>t.stop());
- stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:mode}});
- video.srcObject=stream;video.src=null;await video.play();
-}
-front.onclick=()=>cam('user');
-back.onclick=()=>cam('environment');
-
-file.onchange=e=>{
- const f=e.target.files[0]; if(!f) return;
- if(stream) stream.getTracks().forEach(t=>t.stop());
- video.srcObject=null; video.src=URL.createObjectURL(f);
- video.loop=true; video.onloadeddata=()=>video.play();
-}
-
-function drawVideo(){
- const vw=video.videoWidth, vh=video.videoHeight;
- if(!vw) return;
- const cr=canvas.width/canvas.height, vr=vw/vh;
- let w,h,x,y;
- if(vr>cr){w=canvas.width;h=w/vr;x=0;y=(canvas.height-h)/2}
- else{h=canvas.height;w=h*vr;y=0;x=(canvas.width-w)/2}
- ctx.drawImage(video,x,y,w,h);
- return{x,y,w,h};
-}
-
-// TRUE BLOB DETECTION (connected regions)
-function detect(b){
- if(!b) return [];
- const {x,y,w,h}=b;
- const frame=ctx.getImageData(x,y,w,h);
- if(!prev){prev=frame; return []}
-
- let binary=new Uint8Array(w*h);
- for(let i=0;i<w*h;i++){
-  let diff=Math.abs(frame.data[i*4]-prev.data[i*4]);
-  binary[i]=diff>40?1:0;
- }
- prev=frame;
-
- let visited=new Uint8Array(w*h);
- let blobs=[];
-
- function floodFill(idx){
-  let stack=[idx], points=[];
-  while(stack.length){
-   let i=stack.pop();
-   if(visited[i]||!binary[i]) continue;
-   visited[i]=1;
-   let px=i%w, py=Math.floor(i/w);
-   points.push({x:px,y:py});
-
-   let neighbors=[i-1,i+1,i-w,i+w];
-   neighbors.forEach(n=>{
-    if(n>=0 && n<w*h && !visited[n]) stack.push(n);
-   });
-  }
-  return points;
- }
-
- for(let i=0;i<w*h;i++){
-  if(binary[i] && !visited[i]){
-   let pts=floodFill(i);
-   if(pts.length>50){
-    let cx=pts.reduce((s,p)=>s+p.x,0)/pts.length + x;
-    let cy=pts.reduce((s,p)=>s+p.y,0)/pts.length + y;
-    blobs.push({cx,cy,size:pts.length});
-   }
-  }
- }
- return blobs;
-}
-
-// CONVEX HULL (Graham scan simplified)
-function hull(points){
- if(points.length<3) return points;
- points=points.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
- const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
- let lower=[], upper=[];
- for(let p of points){
-  while(lower.length>=2 && cross(lower[lower.length-2],lower[lower.length-1],p)<=0) lower.pop();
-  lower.push(p);
- }
- for(let i=points.length-1;i>=0;i--){
-  let p=points[i];
-  while(upper.length>=2 && cross(upper[upper.length-2],upper[upper.length-1],p)<=0) upper.pop();
-  upper.push(p);
- }
- upper.pop(); lower.pop();
- return lower.concat(upper);
-}
-
-function draw(blobs){
- // centroids
- ctx.fillStyle='rgba(255,120,120,0.9)';
- blobs.forEach(b=>{
-  ctx.beginPath();ctx.arc(b.cx,b.cy,5,0,Math.PI*2);ctx.fill();
- });
-
- // mesh
- ctx.strokeStyle='rgba(255,255,255,0.1)';
- for(let i=0;i<blobs.length;i++){
-  for(let j=i+1;j<blobs.length;j++){
-   let d=Math.hypot(blobs[i].cx-blobs[j].cx,blobs[i].cy-blobs[j].cy);
-   if(d<200){ctx.beginPath();ctx.moveTo(blobs[i].cx,blobs[i].cy);
-   ctx.lineTo(blobs[j].cx,blobs[j].cy);ctx.stroke();}
-  }
- }
-
- // convex hull
- let pts=blobs.map(b=>({x:b.cx,y:b.cy}));
- let h=hull(pts);
- if(h.length>2){
-  ctx.strokeStyle='rgba(0,200,255,0.7)';
-  ctx.beginPath();
-  h.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
-  ctx.closePath();ctx.stroke();
- }
-}
-
-// --- AUDIO (harmonic mapping) ---
-let actx,osc1,osc2,noise,filter,gain;
-const scale=[0,3,5,7,10]; // minor pentatonic
-
-document.body.onclick=()=>{
- if(!actx){
-  actx=new AudioContext();
-  osc1=actx.createOscillator();
-  osc2=actx.createOscillator();
-  osc1.frequency.value=110;
-  osc2.frequency.value=111;
-
-  let buffer=actx.createBuffer(1,44100,44100);
-  let data=buffer.getChannelData(0);
-  for(let i=0;i<data.length;i++) data[i]=Math.random()*2-1;
-  noise=actx.createBufferSource(); noise.buffer=buffer; noise.loop=true;
-
-  filter=actx.createBiquadFilter(); filter.type='lowpass';
-  gain=actx.createGain(); gain.gain.value=0.08;
-
-  osc1.connect(filter); osc2.connect(filter); noise.connect(filter);
-  filter.connect(gain).connect(actx.destination);
-
-  osc1.start(); osc2.start(); noise.start();
- }
-}
-
-function sound(blobs){
- if(!actx) return;
- let intensity=blobs.length;
-
- // pick pitch from position
- if(blobs.length){
-  let avgX=blobs.reduce((s,b)=>s+b.cx,0)/blobs.length;
-  let noteIndex=Math.floor((avgX/canvas.width)*scale.length);
-  let freq=110*Math.pow(2,scale[noteIndex]/12);
-  osc1.frequency.value=freq;
-  osc2.frequency.value=freq*1.01;
- }
-
- filter.frequency.value=300+intensity*60;
- gain.gain.value=0.05+intensity*0.01;
-}
-
-function loop(){
- ctx.clearRect(0,0,canvas.width,canvas.height);
- if(video.readyState>=2){
-  let b=drawVideo();
-  let blobs=detect(b);
-  draw(blobs);
-  sound(blobs);
- }
- requestAnimationFrame(loop);
-}
-loop();
-
-// RECORD
-let rec,chunks=[];
-rec.onclick=()=>{
- const s=canvas.captureStream();
- rec=new MediaRecorder(s);
- rec.ondataavailable=e=>chunks.push(e.data);
- rec.onstop=()=>{
-  let blob=new Blob(chunks,{type:'video/webm'});
-  let a=document.createElement('a');
-  a.href=URL.createObjectURL(blob);
-  a.download='echomotion.webm';a.click();chunks=[];
- };
- rec.start();
+// ─── SCALES (semitone offsets from root C) ───
+const SCALES = {
+  penta_minor: { name:'Penta Minor', notes:[0,3,5,7,10],      root:57 }, // root A3
+  penta_major: { name:'Penta Major', notes:[0,2,4,7,9],       root:60 }, // root C4
+  whole_tone:  { name:'Whole Tone',  notes:[0,2,4,6,8,10],    root:60 },
+  minor:       { name:'Minor',       notes:[0,2,3,5,7,8,10],  root:57 },
+  major:       { name:'Major',       notes:[0,2,4,5,7,9,11],  root:60 },
+  chromatic:   { name:'Chromatic',   notes:[0,1,2,3,4,5,6,7,8,9,10,11], root:60 },
 };
-stop.onclick=()=>{if(rec)rec.stop();};
+const NOTE_NAMES = ['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+
+// ─── STATE ───────────────────────────────────
+let source      = 'camera';
+let facingMode  = 'user';
+let stream      = null;
+let animId      = null;
+let prevFrame   = null;
+let blobTrails  = {};
+let nextId      = 0;
+let recording   = false;
+let mediaRec    = null;
+let recChunks   = [];
+let recBlob     = null;
+let lastTime    = performance.now();
+let frameCount  = 0;
+
+const sliders   = { sensitivity:15, minsize:200, maxsize:15000 };
+const ovs       = { hull:false, voro:false, force:false,
+                    lissa:false, dela:false, fourier:false, rdiff:false };
+
+// Reaction diffusion buffers
+let rdA = null, rdB = null, rdW = 0, rdH = 0;
+const RD_SCALE  = 4;
+
+// Fourier ring history
+let fourierRings = [];
+
+// Lissajous history per blob: tid → {xs:[], ys:[]}
+let lissaHistory = {};
+
+// ─── SOUND STATE ─────────────────────────────
+let audioCtx    = null;
+let soundOn     = false;
+let currentScale = 'penta_minor';
+
+// Per-blob voice pool: blobId → { osc, gain, filter, panner }
+let voicePool   = {};
+
+// Shared audio graph nodes
+let droneOsc    = null;   // drone oscillator
+let droneGain   = null;   // drone volume
+let masterGain  = null;   // master out
+let reverbNode  = null;   // convolver reverb
+let reverbGain  = null;   // wet reverb
+let dryGain     = null;   // dry signal
+let distNode    = null;   // waveshaper distortion
+
+const soundParams = {
+  droneVol:    0.60,
+  pitchOctaves: 2,
+  volSens:     5,
+  attack:      0.8,
+  filterBase:  1200,
+  reverbMix:   0.35,
+  distortion:  0.0,
+};
+
+// ─── ELEMENTS ────────────────────────────────
+const vid  = document.getElementById('vid');
+const cvs  = document.getElementById('overlay');
+const ctx  = cvs.getContext('2d', { willReadFrequently:true });
+const offC = document.createElement('canvas');
+const offX = offC.getContext('2d', { willReadFrequently:true });
+
+// ═══════════════════════════════════════════════
+// AUDIO ENGINE
+// ═══════════════════════════════════════════════
+
+function midiToHz(midi) {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+// Quantise a 0..1 normalised X position to the nearest scale degree
+function xToScaleHz(normX) {
+  const scale = SCALES[currentScale];
+  const notes = scale.notes;
+  const root  = scale.root;
+  const octaves = soundParams.pitchOctaves;
+  // Total semitone range
+  const totalSemitones = octaves * 12;
+  const semitone = Math.round(normX * totalSemitones);
+  // Find closest scale degree
+  const oct = Math.floor(semitone / 12);
+  const rem = semitone % 12;
+  let closest = notes[0], minDist = 99;
+  for (const n of notes) {
+    const d = Math.abs(n - rem);
+    const d2 = Math.abs(n - rem - 12); // wrap
+    const dd = Math.min(d, d2);
+    if (dd < minDist) { minDist = dd; closest = n; }
+  }
+  const midi = root + oct * 12 + closest;
+  return midiToHz(Math.min(108, Math.max(24, midi)));
+}
+
+// Build a simple convolution reverb impulse
+function buildReverb(ctx, duration = 2.5, decay = 3.0) {
+  const rate    = ctx.sampleRate;
+  const length  = rate * duration;
+  const buf     = ctx.createBuffer(2, length, rate);
+  for (let c = 0; c < 2; c++) {
+    const d = buf.getChannelData(c);
+    for (let i = 0; i < length; i++) {
+      d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / length, decay);
+    }
+  }
+  return buf;
+}
+
+// Build distortion curve
+function makeDistCurve(amount) {
+  const samples = 256;
+  const curve   = new Float32Array(samples);
+  const k       = amount === 0 ? 0 : 100 * amount;
+  for (let i = 0; i < samples; i++) {
+    const x = (i * 2) / samples - 1;
+    curve[i] = k === 0 ? x : (3 + k) * x * 20 * (Math.PI / 180) /
+               (Math.PI + k * Math.abs(x));
+  }
+  return curve;
+}
+
+async function initAudio() {
+  if (audioCtx) return;
+  audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+
+  // ── Master chain ──────────────────────────
+  masterGain = audioCtx.createGain();
+  masterGain.gain.value = 0.85;
+  masterGain.connect(audioCtx.destination);
+
+  // Distortion waveshaper
+  distNode = audioCtx.createWaveShaper();
+  distNode.curve = makeDistCurve(0);
+  distNode.oversample = '4x';
+
+  // Reverb (convolver)
+  reverbNode = audioCtx.createConvolver();
+  reverbNode.buffer = buildReverb(audioCtx);
+
+  // Dry / Wet mix
+  dryGain   = audioCtx.createGain();
+  reverbGain = audioCtx.createGain();
+  dryGain.gain.value    = 1 - soundParams.reverbMix;
+  reverbGain.gain.value = soundParams.reverbMix;
+
+  distNode.connect(dryGain);
+  distNode.connect(reverbNode);
+  reverbNode.connect(reverbGain);
+  dryGain.connect(masterGain);
+  reverbGain.connect(masterGain);
+
+  // ── Drone pad ─────────────────────────────
+  // Three detuned oscillators layered for richness
+  droneGain = audioCtx.createGain();
+  droneGain.gain.value = 0;
+  droneGain.connect(distNode);
+
+  const droneDefs = [
+    { type: 'sine',     detune: 0   },
+    { type: 'triangle', detune: 7   },
+    { type: 'sine',     detune: -5  },
+    { type: 'triangle', detune: 1200 }, // octave up, quiet
+  ];
+  const droneOscs = [];
+  const droneGains = [];
+  for (const [i, def] of droneDefs.entries()) {
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = def.type;
+    o.frequency.value = 110; // A2 root — will update on scale change
+    o.detune.value    = def.detune;
+    g.gain.value      = i === 3 ? 0.08 : (i === 0 ? 0.5 : 0.25);
+    o.connect(g);
+    g.connect(droneGain);
+    o.start();
+    droneOscs.push(o);
+    droneGains.push(g);
+  }
+  // Store refs so we can retune
+  window._droneOscs   = droneOscs;
+  window._droneGains  = droneGains;
+
+  // Fade drone in
+  droneGain.gain.setTargetAtTime(soundParams.droneVol * 0.4, audioCtx.currentTime, 1.2);
+}
+
+function updateDrone() {
+  if (!droneGain) return;
+  droneGain.gain.setTargetAtTime(soundParams.droneVol * 0.4, audioCtx.currentTime, 0.3);
+}
+
+function updateReverbMix() {
+  if (!dryGain) return;
+  dryGain.gain.setTargetAtTime(1 - soundParams.reverbMix, audioCtx.currentTime, 0.1);
+  reverbGain.gain.setTargetAtTime(soundParams.reverbMix, audioCtx.currentTime, 0.1);
+}
+
+function retuneDrone() {
+  if (!window._droneOscs) return;
+  const scale = SCALES[currentScale];
+  const rootHz = midiToHz(scale.root - 12); // an octave below root
+  for (const o of window._droneOscs) {
+    o.frequency.setTargetAtTime(rootHz, audioCtx.currentTime, 0.5);
+  }
+}
+
+// Create or update a voice for a tracked blob
+function updateVoice(tid, blob, W, H) {
+  if (!audioCtx || !soundOn) return;
+
+  const normX = blob.cx / W;
+  const normY = 1 - (blob.cy / H); // invert: top = bright
+  const normSize = Math.min(1, blob.area / 8000);
+
+  // Derive velocity from trail
+  const trail = blobTrails[tid];
+  let velocity = 0;
+  if (trail && trail.length >= 3) {
+    const n = trail.length;
+    velocity = Math.hypot(
+      trail[n-1].x - trail[n-3].x,
+      trail[n-1].y - trail[n-3].y
+    ) / 2;
+  }
+  const normVel = Math.min(1, velocity / (30 * soundParams.volSens));
+
+  // Target frequency (quantised to scale)
+  const targetHz = xToScaleHz(normX);
+
+  // Filter cutoff: Y maps brightness (up = open)
+  const filterCutoff = soundParams.filterBase * (0.2 + normY * 4.8);
+
+  // Volume: velocity + size blend, shaped by volSens
+  const targetVol = Math.min(0.85, 0.1 + normVel * 0.5 + normSize * 0.3);
+
+  // Distortion amount from param + velocity
+  const distAmt = Math.min(1, soundParams.distortion + normVel * 0.3);
+  if (distNode) distNode.curve = makeDistCurve(distAmt);
+
+  if (!voicePool[tid]) {
+    // Create new voice
+    const osc     = audioCtx.createOscillator();
+    const gain    = audioCtx.createGain();
+    const filter  = audioCtx.createBiquadFilter();
+
+    osc.type = 'sawtooth';
+    osc.frequency.value = targetHz;
+    filter.type = 'lowpass';
+    filter.frequency.value = filterCutoff;
+    filter.Q.value = 2.5;
+    gain.gain.value = 0;
+
+    osc.connect(filter);
+    filter.connect(gain);
+    gain.connect(distNode);
+    osc.start();
+
+    // Fade in
+    gain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, soundParams.attack * 0.3);
+
+    voicePool[tid] = { osc, gain, filter };
+  } else {
+    const v = voicePool[tid];
+    v.osc.frequency.setTargetAtTime(targetHz, audioCtx.currentTime, 0.08);
+    v.filter.frequency.setTargetAtTime(filterCutoff, audioCtx.currentTime, 0.06);
+    v.gain.gain.setTargetAtTime(targetVol, audioCtx.currentTime, 0.12);
+  }
+}
+
+function releaseVoice(tid) {
+  if (!voicePool[tid]) return;
+  const v = voicePool[tid];
+  const t = audioCtx.currentTime;
+  v.gain.gain.setTargetAtTime(0, t, soundParams.attack * 0.5);
+  setTimeout(() => {
+    try { v.osc.stop(); } catch(e){}
+    delete voicePool[tid];
+  }, soundParams.attack * 1200);
+}
+
+function releaseAllVoices() {
+  for (const tid of Object.keys(voicePool)) releaseVoice(+tid);
+}
+
+async function toggleSound() {
+  if (!soundOn) {
+    await initAudio();
+    if (audioCtx.state === 'suspended') await audioCtx.resume();
+    soundOn = true;
+    document.getElementById('btn-sound').textContent = '🔊 Sound On';
+    document.getElementById('btn-sound').classList.remove('off');
+    document.getElementById('sound-badge').classList.add('active');
+    document.getElementById('sound-label').textContent = 'Listening…';
+    retuneDrone();
+  } else {
+    soundOn = false;
+    releaseAllVoices();
+    if (droneGain) droneGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
+    document.getElementById('btn-sound').textContent = '🔇 Sound Off';
+    document.getElementById('btn-sound').classList.add('off');
+    document.getElementById('sound-badge').classList.remove('active');
+    document.getElementById('sound-label').textContent = 'Sound off';
+  }
+}
+
+function onScaleChange() {
+  currentScale = document.getElementById('scale-select').value;
+  renderNoteChips();
+  if (audioCtx && soundOn) retuneDrone();
+}
+
+function renderNoteChips() {
+  const scale = SCALES[currentScale];
+  const root  = scale.root % 12;
+  const disp  = document.getElementById('note-display');
+  disp.innerHTML = '';
+  for (const n of scale.notes) {
+    const midi = (root + n) % 12;
+    const chip = document.createElement('div');
+    chip.className = 'note-chip';
+    chip.id = `nc-${n}`;
+    chip.textContent = NOTE_NAMES[midi];
+    disp.appendChild(chip);
+  }
+}
+
+function lightNoteChip(normX, W) {
+  // Flash the note chip corresponding to this X position
+  const scale  = SCALES[currentScale];
+  const notes  = scale.notes;
+  const octaves = soundParams.pitchOctaves;
+  const total  = octaves * 12;
+  const semitone = Math.round(normX * total);
+  const rem    = semitone % 12;
+  let closest  = notes[0], minDist = 99;
+  for (const n of notes) {
+    const d  = Math.min(Math.abs(n - rem), Math.abs(n - rem - 12));
+    if (d < minDist) { minDist = d; closest = n; }
+  }
+  const chip = document.getElementById(`nc-${closest}`);
+  if (!chip) return;
+  chip.classList.add('lit');
+  clearTimeout(chip._t);
+  chip._t = setTimeout(() => chip.classList.remove('lit'), 300);
+}
+
+// Update pitch bars in the video overlay
+function updatePitchBars(blobs, W, H) {
+  const container = document.getElementById('pitch-overlay');
+  // Add/remove bars
+  while (container.children.length < blobs.length) {
+    const bar = document.createElement('div');
+    bar.className = 'pitch-bar';
+    container.appendChild(bar);
+  }
+  while (container.children.length > blobs.length) {
+    container.removeChild(container.lastChild);
+  }
+  blobs.forEach((b, i) => {
+    const normX  = b.cx / W;
+    const normY  = 1 - b.cy / H;
+    const h      = Math.round(8 + normY * 24);
+    const hue    = Math.round(normX * 260);
+    container.children[i].style.height  = h + 'px';
+    container.children[i].style.background = `hsla(${hue},80%,65%,0.6)`;
+  });
+}
+
+// ═══════════════════════════════════════════════
+// SOURCE / CAMERA
+// ═══════════════════════════════════════════════
+
+function setSource(s) {
+  source = s;
+  document.getElementById('btn-cam-src').classList.toggle('off', s !== 'camera');
+  document.getElementById('btn-file-src').classList.toggle('off', s !== 'file');
+  document.getElementById('cam-controls').style.display = s === 'camera' ? 'flex'  : 'none';
+  document.getElementById('file-controls').style.display = s === 'file'  ? 'block' : 'none';
+  document.getElementById('speed-row').style.display     = s === 'file'  ? 'flex'  : 'none';
+  if (s === 'camera') {
+    vid.loop = false;
+    startCamera(facingMode);
+  } else {
+    if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; }
+    vid.srcObject = null;
+  }
+  resetState();
+}
+
+async function startCamera(facing) {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({
+      video:{ facingMode:{ideal:facing}, width:{ideal:1280}, height:{ideal:720} },
+      audio:false
+    });
+    vid.srcObject = stream;
+    vid.loop      = false;
+    await vid.play();
+    facingMode = facing;
+    document.getElementById('btn-front').classList.toggle('active', facing==='user');
+    document.getElementById('btn-back').classList.toggle('active',  facing==='environment');
+    resetState();
+  } catch(e) {
+    alert('Camera error: ' + e.message);
+  }
+}
+
+function switchCamera(f) { startCamera(f); }
+
+function loadVideoFile(input) {
+  const file = input.files[0];
+  if (!file) return;
+  const url  = URL.createObjectURL(file);
+  vid.srcObject = null;
+  vid.src       = url;
+  vid.loop      = false;
+  vid.playbackRate = parseFloat(document.querySelector('#speed-row input').value) || 1;
+  vid.play();
+  const lbl = file.name.length > 28 ? file.name.slice(0,25)+'...' : file.name;
+  document.getElementById('upload-label').textContent = '▶  ' + lbl;
+  document.getElementById('upload-area').classList.add('has-file');
+  resetState();
+}
+
+function setPlaybackSpeed(v) { vid.playbackRate = v; }
+
+// ─── RECORDING ───────────────────────────────
+function toggleRecord() { recording ? stopRecording() : startRecording(); }
+function startRecording() {
+  recChunks = []; recBlob = null;
+  try {
+    mediaRec = new MediaRecorder(cvs.captureStream(30),
+                                 { mimeType:'video/webm;codecs=vp9' });
+  } catch(e) {
+    mediaRec = new MediaRecorder(cvs.captureStream(30));
+  }
+  mediaRec.ondataavailable = e => { if(e.data?.size>0) recChunks.push(e.data); };
+  mediaRec.onstop = () => {
+    recBlob = new Blob(recChunks, { type:'video/webm' });
+    document.getElementById('btn-download').classList.add('ready');
+  };
+  mediaRec.start(100);
+  recording = true;
+  document.getElementById('btn-record').classList.add('recording');
+  document.getElementById('btn-record').textContent = '⏹ Stop';
+  document.getElementById('rec-badge').classList.add('active');
+}
+function stopRecording() {
+  if (mediaRec?.state !== 'inactive') mediaRec.stop();
+  recording = false;
+  document.getElementById('btn-record').classList.remove('recording');
+  document.getElementById('btn-record').textContent = '⏺ Record';
+  document.getElementById('rec-badge').classList.remove('active');
+}
+function downloadRecording() {
+  if (!recBlob) { alert('Record something first.'); return; }
+  const a = Object.assign(document.createElement('a'), {
+    href: URL.createObjectURL(recBlob),
+    download: 'blobtracker-' + new Date().toISOString().slice(0,19).replace(/:/g,'-') + '.webm'
+  });
+  a.click();
+  URL.revokeObjectURL(a.href);
+}
+
+// ─── UI HELPERS ──────────────────────────────
+function toggleOv(k) {
+  ovs[k] = !ovs[k];
+  document.getElementById('tog-'+k).classList.toggle('on', ovs[k]);
+  if (k === 'rdiff' && ovs[k]) initRD();
+}
+
+function resetState() {
+  prevFrame    = null;
+  blobTrails   = {};
+  lissaHistory = {};
+  fourierRings = [];
+  rdA = null; rdB = null;
+  nextId = 0;
+  releaseAllVoices();
+}
+
+// ─── BLOB MATCHING ───────────────────────────
+function matchBlobs(prev, centroids) {
+  const out={}, used=new Set(), MAX=80;
+  for (const [cx,cy] of centroids) {
+    let bid=null, bd=MAX;
+    for (const [tid,tr] of Object.entries(prev)) {
+      if (used.has(tid)||!tr.length) continue;
+      const l=tr[tr.length-1];
+      const d=Math.hypot(cx-l.x, cy-l.y);
+      if (d<bd){bd=d;bid=tid;}
+    }
+    if (bid!==null) {
+      used.add(bid);
+      const t=prev[bid]; t.push({x:cx,y:cy});
+      if(t.length>TRAIL_LEN) t.shift();
+      out[bid]=t;
+    } else {
+      out[nextId]=[{x:cx,y:cy}];
+      nextId++;
+    }
+  }
+  return out;
+}
+
+// ─── MOTION DETECTION ────────────────────────
+function getMotionMask(curr, prev, W, H, thr) {
+  const m = new Uint8Array(W*H);
+  for (let i=0;i<W*H;i++) {
+    const p=i*4;
+    const lc=0.299*curr[p]+0.587*curr[p+1]+0.114*curr[p+2];
+    const lp=0.299*prev[p]+0.587*prev[p+1]+0.114*prev[p+2];
+    m[i]=Math.abs(lc-lp)>thr?255:0;
+  }
+  return m;
+}
+function dilateMask(m,W,H,r=4) {
+  const o=new Uint8Array(W*H);
+  for(let y=0;y<H;y++) for(let x=0;x<W;x++) {
+    let f=false;
+    outer: for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
+      const nx=x+dx,ny=y+dy;
+      if(nx<0||nx>=W||ny<0||ny>=H) continue;
+      if(m[ny*W+nx]===255){f=true;break outer;}
+    }
+    o[y*W+x]=f?255:0;
+  }
+  return o;
+}
+function findBlobs(m,W,H,minA,maxA) {
+  const vis=new Uint8Array(W*H), blobs=[];
+  for(let sy=0;sy<H;sy++) for(let sx=0;sx<W;sx++){
+    const si=sy*W+sx;
+    if(m[si]!==255||vis[si]) continue;
+    const q=[si]; vis[si]=1;
+    let mnx=sx,mxx=sx,mny=sy,mxy=sy,px=0;
+    while(q.length){
+      const i=q.shift(), qx=i%W, qy=(i-qx)/W;
+      px++; mnx=Math.min(mnx,qx); mxx=Math.max(mxx,qx);
+      mny=Math.min(mny,qy); mxy=Math.max(mxy,qy);
+      for(const n of [i-1,i+1,i-W,i+W]){
+        if(n<0||n>=W*H||vis[n]||m[n]!==255) continue;
+        vis[n]=1; q.push(n);
+      }
+    }
+    const bw=mxx-mnx+1,bh=mxy-mny+1;
+    if(px<minA||px>maxA) continue;
+    blobs.push({x:mnx,y:mny,w:bw,h:bh,
+                cx:Math.round(mnx+bw/2),
+                cy:Math.round(mny+bh/2),area:px});
+  }
+  return blobs;
+}
+
+// ─── CONTRAST COLOR ──────────────────────────
+function contrastColor(d,x,y,w,h,W,H) {
+  let s=0,c=0;
+  for(let iy=Math.max(0,y-8);iy<Math.min(H,y+4);iy++)
+    for(let ix=Math.max(0,x);ix<Math.min(W,x+w);ix++){
+      const p=(iy*W+ix)*4;
+      s+=0.299*d[p]+0.587*d[p+1]+0.114*d[p+2];c++;
+    }
+  return c&&s/c<128?'#00f5ff':'#3c14dc';
+}
+
+// ─── CONVEX HULL ─────────────────────────────
+function cross(O,A,B){
+  return (A[0]-O[0])*(B[1]-O[1])-(A[1]-O[1])*(B[0]-O[0]);
+}
+function convexHull(pts){
+  const n=pts.length; if(n<3) return pts;
+  const p=[...pts].sort((a,b)=>a[0]-b[0]||a[1]-b[1]);
+  const lo=[],hi=[];
+  for(const pt of p){
+    while(lo.length>=2&&cross(lo[lo.length-2],lo[lo.length-1],pt)<=0) lo.pop();
+    lo.push(pt);
+  }
+  for(let i=p.length-1;i>=0;i--){
+    const pt=p[i];
+    while(hi.length>=2&&cross(hi[hi.length-2],hi[hi.length-1],pt)<=0) hi.pop();
+    hi.push(pt);
+  }
+  return lo.slice(0,-1).concat(hi.slice(0,-1));
+}
+function drawHull(c2,blobs){
+  if(blobs.length<2) return;
+  const pts=blobs.map(b=>[b.cx,b.cy]);
+  const gcx=pts.reduce((s,p)=>s+p[0],0)/pts.length;
+  const gcy=pts.reduce((s,p)=>s+p[1],0)/pts.length;
+  c2.strokeStyle='#ff8844'; c2.fillStyle='#ff8844'; c2.lineWidth=1;
+  for(const b of blobs){
+    c2.beginPath(); c2.moveTo(b.cx,b.cy); c2.lineTo(gcx,gcy); c2.stroke();
+  }
+  c2.beginPath(); c2.arc(gcx,gcy,5,0,Math.PI*2); c2.fill();
+  c2.font='11px -apple-system,sans-serif';
+  c2.fillText('G',gcx+7,gcy+4);
+  if(blobs.length>=3){
+    const h=convexHull(pts);
+    c2.beginPath(); c2.moveTo(h[0][0],h[0][1]);
+    for(let i=1;i<h.length;i++) c2.lineTo(h[i][0],h[i][1]);
+    c2.closePath(); c2.stroke();
+  }
+}
+
+// ─── VORONOI ─────────────────────────────────
+function drawVoronoi(c2,blobs,W,H){
+  if(blobs.length<2) return;
+  const S=4, sw=Math.ceil(W/S), sh=Math.ceil(H/S);
+  const vc=document.createElement('canvas');
+  vc.width=sw; vc.height=sh;
+  const vx=vc.getContext('2d');
+  const cols=['#bb88ff22','#00cfff22','#ff888822','#00ff8822',
+              '#ffaa0022','#ff88cc22','#88ffcc22','#4f8ef722'];
+  const id=new ImageData(sw,sh);
+  for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
+    let bd=Infinity,bc=0;
+    for(let i=0;i<blobs.length;i++){
+      const d=Math.hypot(x*S-blobs[i].cx, y*S-blobs[i].cy);
+      if(d<bd){bd=d;bc=i;}
+    }
+    const col=hexToRgb(cols[bc%cols.length]);
+    const p=(y*sw+x)*4;
+    id.data[p]=col[0]; id.data[p+1]=col[1];
+    id.data[p+2]=col[2]; id.data[p+3]=col[3];
+  }
+  vx.putImageData(id,0,0);
+  c2.save();
+  c2.globalAlpha=0.55;
+  c2.imageSmoothingEnabled=false;
+  c2.drawImage(vc,0,0,W,H);
+  c2.restore();
+  c2.strokeStyle='rgba(187,136,255,0.4)';
+  c2.lineWidth=0.5;
+  const grid=new Int16Array(sw*sh);
+  for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
+    let bc=0,bd=Infinity;
+    for(let i=0;i<blobs.length;i++){
+      const d=Math.hypot(x*S-blobs[i].cx, y*S-blobs[i].cy);
+      if(d<bd){bd=d;bc=i;}
+    }
+    grid[y*sw+x]=bc;
+  }
+  c2.beginPath();
+  for(let y=0;y<sh-1;y++) for(let x=0;x<sw-1;x++){
+    const c=grid[y*sw+x];
+    if(grid[y*sw+x+1]!==c||grid[(y+1)*sw+x]!==c){
+      c2.moveTo(x*S,y*S); c2.lineTo((x+1)*S,y*S);
+    }
+  }
+  c2.stroke();
+}
+function hexToRgb(hex){
+  const r=parseInt(hex.slice(1,3),16)||0;
+  const g=parseInt(hex.slice(3,5),16)||0;
+  const b=parseInt(hex.slice(5,7),16)||0;
+  const a=hex.length>7?parseInt(hex.slice(7,9),16):255;
+  return [r,g,b,a];
+}
+
+// ─── FORCE FIELD ─────────────────────────────
+function drawForceField(c2,blobs,W,H){
+  if(!blobs.length) return;
+  const step=28;
+  c2.strokeStyle='rgba(0,207,255,0.55)';
+  c2.fillStyle='rgba(0,207,255,0.55)';
+  c2.lineWidth=0.8;
+  for(let y=step/2;y<H;y+=step) for(let x=step/2;x<W;x+=step){
+    let fx=0,fy=0;
+    for(const b of blobs){
+      const dx=b.cx-x, dy=b.cy-y;
+      const d2=dx*dx+dy*dy+1;
+      const f=3000/d2;
+      fx+=f*dx/Math.sqrt(d2);
+      fy+=f*dy/Math.sqrt(d2);
+    }
+    const mag=Math.hypot(fx,fy);
+    if(mag<0.3) continue;
+    const sc=Math.min(12,mag);
+    const nx=fx/mag, ny=fy/mag;
+    const ex=x+nx*sc, ey=y+ny*sc;
+    c2.beginPath(); c2.moveTo(x,y); c2.lineTo(ex,ey); c2.stroke();
+    const angle=Math.atan2(ey-y,ex-x);
+    c2.beginPath();
+    c2.moveTo(ex,ey);
+    c2.lineTo(ex-5*Math.cos(angle-0.4),ey-5*Math.sin(angle-0.4));
+    c2.lineTo(ex-5*Math.cos(angle+0.4),ey-5*Math.sin(angle+0.4));
+    c2.closePath(); c2.fill();
+  }
+}
+
+// ─── LISSAJOUS ───────────────────────────────
+function updateLissa(blobs){
+  const ids=new Set(blobs.map((_,i)=>{
+    const tid=findTid(blobs[i].cx,blobs[i].cy);
+    return tid;
+  }));
+  for(const k of Object.keys(lissaHistory)){
+    if(!ids.has(+k)) delete lissaHistory[k];
+  }
+}
+function drawLissajous(c2,blobs,W,H){
+  for(const b of blobs){
+    const tid=findTid(b.cx,b.cy);
+    if(tid===null) continue;
+    if(!lissaHistory[tid]) lissaHistory[tid]={xs:[],ys:[]};
+    const lh=lissaHistory[tid];
+    lh.xs.push(b.cx); lh.ys.push(b.cy);
+    if(lh.xs.length>TRAIL_LEN){ lh.xs.shift(); lh.ys.shift(); }
+    if(lh.xs.length<4) continue;
+    const cx2=W/2, cy2=H/2;
+    const ax=Math.max(...lh.xs)-Math.min(...lh.xs)||1;
+    const ay=Math.max(...lh.ys)-Math.min(...lh.ys)||1;
+    c2.strokeStyle='rgba(0,255,136,0.4)';
+    c2.lineWidth=0.7;
+    c2.beginPath();
+    for(let i=0;i<lh.xs.length;i++){
+      const x2=cx2+(lh.xs[i]-cx2)*0.7;
+      const y2=cy2+(lh.ys[i]-cy2)*0.7;
+      i===0?c2.moveTo(x2,y2):c2.lineTo(x2,y2);
+    }
+    c2.stroke();
+  }
+}
+
+// ─── DELAUNAY ────────────────────────────────
+function delaunay(pts){
+  const n=pts.length;
+  const sx=pts.reduce((s,p)=>s+p[0],0)/n;
+  const sy=pts.reduce((s,p)=>s+p[1],0)/n;
+  const r=Math.max(...pts.map(p=>Math.hypot(p[0]-sx,p[1]-sy)))*3+1;
+  const sup=[[sx-r,sy-r],[sx,sy+r],[sx+r,sy-r]];
+  const all=[...sup,...pts];
+  let tris=[[0,1,2]];
+  for(let pi=3;pi<all.length;pi++){
+    const [px,py]=all[pi];
+    const bad=[];
+    for(const t of tris){
+      const [ax,ay]=all[t[0]], [bx,by]=all[t[1]], [cx2,cy2]=all[t[2]];
+      const D=2*(ax*(by-cy2)+bx*(cy2-ay)+cx2*(ay-by));
+      if(Math.abs(D)<1e-10) continue;
+      const ux=((ax*ax+ay*ay)*(by-cy2)+(bx*bx+by*by)*(cy2-ay)+(cx2*cx2+cy2*cy2)*(ay-by))/D;
+      const uy=((ax*ax+ay*ay)*(cx2-bx)+(bx*bx+by*by)*(ax-cx2)+(cx2*cx2+cy2*cy2)*(bx-ax))/D;
+      const r2=Math.hypot(ax-ux,ay-uy);
+      if(Math.hypot(px-ux,py-uy)<r2) bad.push(t);
+    }
+    const boundary=[];
+    for(const t of bad){
+      for(let i=0;i<3;i++){
+        const e=[t[i],t[(i+1)%3]];
+        const shared=bad.some(t2=>t2!==t&&t2.includes(e[0])&&t2.includes(e[1]));
+        if(!shared) boundary.push(e);
+      }
+    }
+    for(const t of bad){
+      const i=tris.indexOf(t);
+      if(i>-1) tris.splice(i,1);
+    }
+    for(const e of boundary) tris.push([e[0],e[1],pi]);
+  }
+  return tris.filter(t=>!t.some(i=>i<3))
+             .map(t=>t.map(i=>[all[i][0],all[i][1]]));
+}
+function drawDelaunay(c2,blobs){
+  if(blobs.length<3) return;
+  const pts=blobs.map(b=>[b.cx,b.cy]);
+  const tris=delaunay(pts);
+  c2.strokeStyle='rgba(255,170,0,0.55)';
+  c2.fillStyle='rgba(255,170,0,0.06)';
+  c2.lineWidth=0.8;
+  for(const t of tris){
+    c2.beginPath();
+    c2.moveTo(t[0][0],t[0][1]);
+    c2.lineTo(t[1][0],t[1][1]);
+    c2.lineTo(t[2][0],t[2][1]);
+    c2.closePath();
+    c2.fill(); c2.stroke();
+  }
+}
+
+// ─── FOURIER RINGS ───────────────────────────
+function updateFourierRings(blobs,prevBlobs){
+  for(const b of blobs){
+    const tid=findTid(b.cx,b.cy);
+    if(tid===null) continue;
+    const tr=blobTrails[tid];
+    if(!tr||tr.length<4) continue;
+    const n=tr.length;
+    const v1x=tr[n-2].x-tr[n-3].x, v1y=tr[n-2].y-tr[n-3].y;
+    const v2x=tr[n-1].x-tr[n-2].x, v2y=tr[n-1].y-tr[n-2].y;
+    const dot=v1x*v2x+v1y*v2y;
+    const m1=Math.hypot(v1x,v1y), m2=Math.hypot(v2x,v2y);
+    if(m1<1||m2<1) continue;
+    const angle=Math.acos(Math.max(-1,Math.min(1,dot/(m1*m2))));
+    const speed=Math.hypot(v2x,v2y);
+    if(angle>0.2&&speed>2){
+      fourierRings.push({ x:b.cx, y:b.cy, r:0,
+                          maxR: 30+speed*4, age:0 });
+    }
+  }
+  fourierRings = fourierRings
+    .map(r=>({...r, r:r.r+2.5, age:r.age+1}))
+    .filter(r=>r.r<r.maxR);
+}
+function drawFourierRings(c2){
+  for(const r of fourierRings){
+    const alpha=1-(r.r/r.maxR);
+    c2.strokeStyle=`rgba(255,136,204,${alpha*0.7})`;
+    c2.lineWidth=0.8;
+    c2.beginPath();
+    c2.arc(r.x,r.y,r.r,0,Math.PI*2);
+    c2.stroke();
+    if(r.r>10){
+      c2.strokeStyle=`rgba(255,136,204,${alpha*0.3})`;
+      c2.beginPath();
+      c2.arc(r.x,r.y,r.r*0.5,0,Math.PI*2);
+      c2.stroke();
+    }
+  }
+}
+
+// ─── REACTION DIFFUSION ──────────────────────
+function initRD(){
+  const w=Math.ceil(cvs.width/RD_SCALE)||80;
+  const h=Math.ceil(cvs.height/RD_SCALE)||60;
+  if(rdW===w&&rdH===h&&rdA) return;
+  rdW=w; rdH=h;
+  rdA=new Float32Array(w*h).fill(1);
+  rdB=new Float32Array(w*h).fill(0);
+}
+function seedRD(blobs,W,H){
+  if(!rdA) return;
+  for(const b of blobs){
+    const sx=Math.floor(b.cx/RD_SCALE);
+    const sy=Math.floor(b.cy/RD_SCALE);
+    for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+      const nx=sx+dx, ny=sy+dy;
+      if(nx<0||nx>=rdW||ny<0||ny>=rdH) continue;
+      rdB[ny*rdW+nx]=1;
+    }
+  }
+}
+function stepRD(steps=3){
+  if(!rdA) return;
+  const Da=0.16, Db=0.08, f=0.060, k=0.062;
+  const nA=new Float32Array(rdA), nB=new Float32Array(rdB);
+  const W=rdW, H=rdH;
+  for(let s=0;s<steps;s++){
+    for(let y=1;y<H-1;y++) for(let x=1;x<W-1;x++){
+      const i=y*W+x;
+      const lapA=rdA[i-1]+rdA[i+1]+rdA[i-W]+rdA[i+W]-4*rdA[i];
+      const lapB=rdB[i-1]+rdB[i+1]+rdB[i-W]+rdB[i+W]-4*rdB[i];
+      const a=rdA[i], b=rdB[i];
+      const abb=a*b*b;
+      nA[i]=Math.max(0,Math.min(1, a+Da*lapA-abb+f*(1-a)));
+      nB[i]=Math.max(0,Math.min(1, b+Db*lapB+abb-(k+f)*b));
+    }
+    rdA.set(nA); rdB.set(nB);
+  }
+}
+function drawRD(c2,W,H){
+  if(!rdA||!rdB) return;
+  const id=new ImageData(rdW,rdH);
+  for(let i=0;i<rdW*rdH;i++){
+    const p=i*4;
+    id.data[p]  =Math.round((1-rdA[i])*0+rdB[i]*136);
+    id.data[p+1]=Math.round(rdA[i]*80+rdB[i]*255);
+    id.data[p+2]=Math.round(rdA[i]*60+rdB[i]*204);
+    id.data[p+3]=Math.round(rdB[i]*180);
+  }
+  const tc=document.createElement('canvas');
+  tc.width=rdW; tc.height=rdH;
+  tc.getContext('2d').putImageData(id,0,0);
+  c2.save();
+  c2.globalAlpha=0.75;
+  c2.imageSmoothingEnabled=true;
+  c2.drawImage(tc,0,0,W,H);
+  c2.restore();
+}
+
+// ─── HELPERS ─────────────────────────────────
+function findTid(cx,cy){
+  let best=null,bd=40;
+  for(const [tid,tr] of Object.entries(blobTrails)){
+    if(!tr.length) continue;
+    const l=tr[tr.length-1];
+    const d=Math.hypot(cx-l.x,cy-l.y);
+    if(d<bd){bd=d;best=+tid;}
+  }
+  return best;
+}
+
+// ─── MAIN LOOP ───────────────────────────────
+function loop(){
+  animId=requestAnimationFrame(loop);
+  if(!vid.videoWidth||vid.readyState<2) return;
+
+  const W=vid.videoWidth, H=vid.videoHeight;
+  if(cvs.width!==W||cvs.height!==H){
+    cvs.width=W; cvs.height=H;
+    offC.width=W; offC.height=H;
+    if(ovs.rdiff) initRD();
+  }
+
+  offX.drawImage(vid,0,0,W,H);
+  const curr=offX.getImageData(0,0,W,H);
+
+  // FPS
+  frameCount++;
+  const now=performance.now();
+  if(now-lastTime>=1000){
+    document.getElementById('fps-label').textContent=frameCount+' fps';
+    frameCount=0; lastTime=now;
+  }
+
+  const thr=Math.max(1,60-sliders.sensitivity);
+  let blobs=[];
+  if(prevFrame){
+    let mask=getMotionMask(curr.data,prevFrame.data,W,H,thr);
+    mask=dilateMask(mask,W,H,4);
+    blobs=findBlobs(mask,W,H,sliders.minsize,sliders.maxsize);
+  }
+  if(!prevFrame) prevFrame=curr;
+  else {
+    for(let i=0;i<curr.data.length;i++)
+      prevFrame.data[i]=prevFrame.data[i]*0.7+curr.data[i]*0.3;
+  }
+
+  const prevBlobs=Object.values(blobTrails).map(t=>t[t.length-1]).filter(Boolean);
+  blobTrails=matchBlobs(blobTrails, blobs.map(b=>[b.cx,b.cy]));
+
+  // RD seed
+  if(ovs.rdiff){ if(!rdA) initRD(); seedRD(blobs,W,H); stepRD(3); }
+
+  // Fourier ring update
+  if(ovs.fourier) updateFourierRings(blobs,prevBlobs);
+
+  // ── SOUND UPDATE ──────────────────────────
+  if(soundOn && audioCtx) {
+    const activeTids = new Set();
+    // Limit to MAX_VOICES most active blobs (by area)
+    const sorted = [...blobs].sort((a,b) => b.area - a.area).slice(0, MAX_VOICES);
+    for(const b of sorted){
+      const tid = findTid(b.cx, b.cy);
+      if(tid === null) continue;
+      activeTids.add(tid);
+      updateVoice(tid, b, W, H);
+      lightNoteChip(b.cx / W, W);
+    }
+    // Release voices for blobs no longer present
+    for(const tid of Object.keys(voicePool)){
+      if(!activeTids.has(+tid)) releaseVoice(+tid);
+    }
+    // Update sound badge with note count
+    document.getElementById('sound-label').textContent =
+      sorted.length ? `${sorted.length} voice${sorted.length>1?'s':''}` : 'Listening…';
+  }
+
+  // Pitch bars visualiser
+  updatePitchBars(blobs, W, H);
+
+  // ── DRAW ──────────────────────────────────
+  ctx.clearRect(0,0,W,H);
+  ctx.drawImage(vid,0,0,W,H);
+
+  if(ovs.rdiff) drawRD(ctx,W,H);
+  if(ovs.voro&&blobs.length>=2) drawVoronoi(ctx,blobs,W,H);
+  if(ovs.force&&blobs.length) drawForceField(ctx,blobs,W,H);
+  if(ovs.dela&&blobs.length>=3) drawDelaunay(ctx,blobs);
+  if(ovs.hull&&blobs.length>=2) drawHull(ctx,blobs);
+  if(ovs.fourier) drawFourierRings(ctx);
+  if(ovs.lissa&&blobs.length) drawLissajous(ctx,blobs,W,H);
+
+  // Overlap detection
+  const ovSet=new Set();
+  for(let i=0;i<blobs.length;i++)
+    for(let j=i+1;j<blobs.length;j++){
+      const a=blobs[i],b=blobs[j];
+      if(a.x<b.x+b.w&&a.x+a.w>b.x&&a.y<b.y+b.h&&a.y+a.h>b.y){
+        ovSet.add(i); ovSet.add(j);
+      }
+    }
+
+  // Blob boxes + labels
+  for(let i=0;i<blobs.length;i++){
+    const b=blobs[i];
+    const isOv=ovSet.has(i);
+    const col=isOv?OVERLAP_COL:contrastColor(curr.data,b.x,b.y,b.w,b.h,W,H);
+
+    ctx.strokeStyle=col; ctx.lineWidth=1;
+    ctx.strokeRect(b.x,b.y,b.w,b.h);
+
+    ctx.lineWidth=2;
+    const t=10;
+    for(const [cx2,cy2,dx,dy] of [
+      [b.x,b.y,1,1],[b.x+b.w,b.y,-1,1],
+      [b.x,b.y+b.h,1,-1],[b.x+b.w,b.y+b.h,-1,-1]
+    ]){
+      ctx.beginPath();
+      ctx.moveTo(cx2,cy2); ctx.lineTo(cx2+dx*t,cy2);
+      ctx.moveTo(cx2,cy2); ctx.lineTo(cx2,cy2+dy*t);
+      ctx.stroke();
+    }
+
+    if(isOv){
+      ctx.fillStyle=OVERLAP_COL;
+      ctx.font='11px -apple-system,sans-serif';
+      ctx.fillText('OVERLAP',b.x,b.y-6);
+    }
+
+    const lbl=`#${i+1}  ${b.cx},${b.cy}`;
+    let lx=b.x+b.w+8; const ly=b.y+14;
+    ctx.font='11px -apple-system,sans-serif';
+    const tw=ctx.measureText(lbl).width;
+    if(lx+tw>W) lx=b.x-tw-8;
+    ctx.fillStyle=col;
+    ctx.fillText(lbl,lx,ly);
+  }
+
+  document.getElementById('blob-badge').textContent=
+    blobs.length+(blobs.length===1?' blob':' blobs');
+}
+
+// ─── INIT ────────────────────────────────────
+renderNoteChips();
+setSource('camera');
+loop();
 </script>
 </body>
 </html>
