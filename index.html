@@ -1,240 +1,145 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>Blob Instrument Pro</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>EchoMotion</title>
 <style>
-  body { margin:0; font-family:system-ui; background:#0b0b0b; color:#fff; overflow:hidden; }
-  canvas { position:absolute; top:0; left:0; }
- 
-  .panel {
-    position:fixed; top:10px; left:10px; width:280px;
-    background:rgba(20,20,20,0.9); backdrop-filter:blur(10px);
-    border-radius:14px; padding:12px; z-index:10;
-  }
-  .panel h3 { font-size:13px; opacity:.7; margin:6px 0; }
-  .control { margin-bottom:10px; }
-  label { font-size:11px; opacity:.7; }
-  input, select, button { width:100%; margin-top:3px; }
-  input[type=range] { cursor:pointer; }
-  button { background:#222; color:#fff; border:none; padding:6px; border-radius:6px; }
-  button:hover { background:#444; }
- 
-  .topbar {
-    position:fixed; top:10px; right:10px; z-index:10;
-  }
- 
-  .hidden { display:none; }
+body { margin:0; background:#000; color:#fff; font-family:sans-serif; overflow:hidden; }
+canvas { display:block; }
+#ui {
+  position:fixed; top:10px; left:10px;
+  background:rgba(0,0,0,0.6);
+  padding:10px; border-radius:10px;
+}
+label { display:block; font-size:12px; }
 </style>
 </head>
 <body>
+
+<video id="video" autoplay playsinline style="display:none"></video>
 <canvas id="canvas"></canvas>
- 
-<div class="panel" id="ui">
-  <h3>🎵 MUSIC</h3>
-  <div class="control">
-    <label>BPM</label>
-    <input type="range" id="bpm" min="60" max="140" value="90" />
-  </div>
-  <div class="control">
-    <label>Scale</label>
-    <select id="scale">
-      <option value="pentatonic">Pentatonic</option>
-      <option value="minor">Minor</option>
-      <option value="major">Major</option>
-    </select>
-  </div>
-  <div class="control">
-    <label>Volume</label>
-    <input type="range" id="volume" min="0" max="1" step="0.01" value="0.2" />
-  </div>
-  <div class="control">
-    <label>Reverb</label>
-    <input type="range" id="reverb" min="0" max="1" step="0.01" value="0.2" />
-  </div>
- 
-  <h3>🎨 VISUAL</h3>
-  <div class="control">
-    <label>Trail</label>
-    <input type="range" id="trail" min="0" max="0.2" step="0.01" value="0.05" />
-  </div>
- 
-  <h3>⚡ PRESETS</h3>
-  <button onclick="presetCalm()">Calm</button>
-  <button onclick="presetRhythm()">Rhythm</button>
-  <button onclick="presetChaos()">Chaos</button>
+
+<div id="ui">
+<label>BPM <input type="range" min="60" max="140" value="90" id="bpm"></label>
+<label>Volume <input type="range" min="0" max="1" step="0.01" value="0.2" id="vol"></label>
+<select id="scale">
+<option value="pentatonic">Pentatonic</option>
+<option value="minor">Minor</option>
+<option value="major">Major</option>
+</select>
+<button onclick="startCamera()">Camera</button>
+<input type="file" id="fileInput">
 </div>
- 
-<div class="topbar">
-  <button onclick="toggleUI()">UI</button>
-  <button onclick="toggleFullscreen()">Fullscreen</button>
-</div>
- 
+
 <script>
+const video = document.getElementById('video');
 const canvas = document.getElementById('canvas');
 const ctx = canvas.getContext('2d');
-canvas.width = innerWidth;
-canvas.height = innerHeight;
- 
-// ====== CONFIG ======
+
+let W, H;
+function resize(){
+  W = canvas.width = window.innerWidth;
+  H = canvas.height = window.innerHeight;
+}
+window.onresize = resize; resize();
+
+// CAMERA
+async function startCamera(){
+  const stream = await navigator.mediaDevices.getUserMedia({video:true});
+  video.srcObject = stream;
+}
+
+// FILE INPUT
+document.getElementById('fileInput').onchange = e => {
+  const file = e.target.files[0];
+  video.src = URL.createObjectURL(file);
+};
+
+// MOTION DETECTION
+let prevFrame;
+function getBlobs(){
+  ctx.drawImage(video,0,0,W,H);
+  let frame = ctx.getImageData(0,0,W,H);
+  let blobs = [];
+
+  if(prevFrame){
+    for(let i=0;i<frame.data.length;i+=4){
+      let diff = Math.abs(frame.data[i]-prevFrame.data[i]);
+      if(diff>40){
+        let x = (i/4)%W;
+        let y = Math.floor((i/4)/W);
+        blobs.push({x,y});
+      }
+    }
+  }
+
+  prevFrame = frame;
+  return blobs;
+}
+
+// AUDIO
+const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+
 const scales = {
   pentatonic:[0,2,4,7,9],
   minor:[0,2,3,5,7,8,10],
   major:[0,2,4,5,7,9,11]
 };
- 
-let config = {
-  bpm:90,
-  scale:scales.pentatonic,
-  volume:0.2,
-  trail:0.05,
-  reverb:0.2
-};
- 
-// ====== UI ======
-bpm.oninput=e=>config.bpm=+e.target.value;
-volume.oninput=e=>config.volume=+e.target.value;
-trail.oninput=e=>config.trail=+e.target.value;
-reverb.oninput=e=>config.reverb=+e.target.value;
-scale.onchange=e=>config.scale=scales[e.target.value];
- 
-function toggleUI(){ document.getElementById('ui').classList.toggle('hidden'); }
-function toggleFullscreen(){ document.body.requestFullscreen(); }
- 
-// ====== AUDIO ENGINE ======
-const ctxAudio = new (window.AudioContext||window.webkitAudioContext)();
- 
-const master = ctxAudio.createGain();
-master.gain.value = 0.8;
-master.connect(ctxAudio.destination);
- 
-const delay = ctxAudio.createDelay();
-delay.delayTime.value = 0.25;
-const feedback = ctxAudio.createGain();
-feedback.gain.value = 0.3;
-delay.connect(feedback);
-feedback.connect(delay);
-delay.connect(master);
- 
-function midiToFreq(m){ return 440*Math.pow(2,(m-69)/12); }
- 
-function playNote(freq, vol){
-  const osc = ctxAudio.createOscillator();
-  const gain = ctxAudio.createGain();
- 
-  osc.type = 'sine';
-  osc.frequency.value = freq;
- 
-  gain.gain.setValueAtTime(0, ctxAudio.currentTime);
-  gain.gain.linearRampToValueAtTime(vol, ctxAudio.currentTime+0.01);
-  gain.gain.exponentialRampToValueAtTime(0.001, ctxAudio.currentTime+0.4);
- 
-  osc.connect(gain);
-  gain.connect(master);
-  gain.connect(delay);
- 
-  osc.start();
-  osc.stop(ctxAudio.currentTime+0.5);
+
+function midiToFreq(m){
+  return 440*Math.pow(2,(m-69)/12);
 }
- 
-// ====== MUSIC LOGIC ======
-function quantize(x){
-  let idx = Math.floor((x/canvas.width)*config.scale.length);
-  return 48 + config.scale[idx % config.scale.length];
+
+function play(freq, vol){
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.frequency.value = freq;
+  g.gain.value = vol;
+  o.connect(g);
+  g.connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime+0.2);
 }
- 
-function triggerNotes(){
-  blobs.slice(0,5).forEach(b=>{
-    let note = quantize(b.x);
-    let speed = b.v || 0.5;
-    playNote(midiToFreq(note), config.volume*speed);
-    b.flash = 1;
+
+let lastBeat = 0;
+function processAudio(blobs){
+  let bpm = +document.getElementById('bpm').value;
+  let vol = +document.getElementById('vol').value;
+  let scale = scales[document.getElementById('scale').value];
+
+  let now = performance.now();
+  let interval = 60000/bpm;
+  if(now-lastBeat<interval) return;
+  lastBeat = now;
+
+  blobs.slice(0,10).forEach(b=>{
+    let idx = Math.floor((b.x/W)*scale.length);
+    let note = 48 + scale[idx%scale.length];
+    play(midiToFreq(note), vol);
   });
 }
- 
-setInterval(()=>{
-  triggerNotes();
-}, 60000/config.bpm);
- 
-// ====== BLOB INPUT (KEEP YOUR ORIGINAL SYSTEM) ======
-let blobs = [];
- 
-// 🔴 IMPORTANT: Replace below with your actual tracker output
-// Expected format: [{x, y, v(optional velocity)}]
- 
-function demoBlobs(){
-  blobs = Array.from({length:6},()=>({
-    x:Math.random()*canvas.width,
-    y:Math.random()*canvas.height,
-    v:Math.random()
-  }));
-}
-setInterval(demoBlobs,400);
- 
-// ====== VISUAL ======
-function draw(){
-  ctx.fillStyle = `rgba(0,0,0,${config.trail})`;
-  ctx.fillRect(0,0,canvas.width,canvas.height);
- 
+
+// DRAW
+function loop(){
+  requestAnimationFrame(loop);
+  if(video.readyState<2) return;
+
+  let blobs = getBlobs();
+
+  ctx.fillStyle='black';
+  ctx.fillRect(0,0,W,H);
+
+  ctx.fillStyle='white';
   blobs.forEach(b=>{
-    let size = 8 + (b.v||0)*10;
-    let brightness = b.flash ? 255 : 180;
- 
-    ctx.beginPath();
-    ctx.arc(b.x,b.y,size,0,Math.PI*2);
-    ctx.fillStyle = `rgb(${brightness},${brightness},255)`;
-    ctx.fill();
- 
-    b.flash *= 0.8;
+    ctx.fillRect(b.x,b.y,2,2);
   });
- 
-  requestAnimationFrame(draw);
+
+  processAudio(blobs);
 }
-draw();
- 
-// ====== PRESETS ======
-function presetCalm(){
-  config.bpm=70;
-  config.scale=scales.pentatonic;
-  config.volume=0.15;
-  config.trail=0.08;
-}
- 
-function presetRhythm(){
-  config.bpm=110;
-  config.scale=scales.minor;
-  config.volume=0.25;
-  config.trail=0.04;
-}
- 
-function presetChaos(){
-  config.bpm=130;
-  config.scale=scales.major;
-  config.volume=0.3;
-  config.trail=0.02;
-}
- 
-// ====== KEYBOARD CONTROLS ======
-document.addEventListener('keydown',e=>{
-  if(e.key==='1') presetCalm();
-  if(e.key==='2') presetRhythm();
-  if(e.key==='3') presetChaos();
-  if(e.key===' ') triggerNotes();
-});
- 
-// ====== MIDI SUPPORT (basic) ======
-if(navigator.requestMIDIAccess){
-  navigator.requestMIDIAccess().then(midi=>{
-    midi.inputs.forEach(input=>{
-      input.onmidimessage = msg=>{
-        let [cmd,note,vel] = msg.data;
-        if(cmd===144) playNote(midiToFreq(note), vel/127);
-      };
-    });
-  });
-}
- 
+
+loop();
 </script>
+
 </body>
 </html>
