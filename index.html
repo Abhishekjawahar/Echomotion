@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EchoMotion - Production</title>
+<title>EchoMotion - Advanced</title>
 <style>
 body{margin:0;background:#000;color:#fff;font-family:sans-serif;overflow:hidden}
 #wrap{position:relative;width:100vw;height:100vh}
@@ -30,7 +30,7 @@ button,input{padding:6px 10px;border-radius:6px;border:none}
 const video=document.getElementById('video');
 const canvas=document.getElementById('canvas');
 const ctx=canvas.getContext('2d');
-let stream=null,prev=null,blobs=[];
+let stream=null,prev=null;
 
 function resize(){canvas.width=innerWidth;canvas.height=innerHeight}
 window.onresize=resize;resize();
@@ -61,68 +61,151 @@ function drawVideo(){
  return{x,y,w,h};
 }
 
+// TRUE BLOB DETECTION (connected regions)
 function detect(b){
- if(!b) return;
- const f=ctx.getImageData(b.x,b.y,b.w,b.h);
- if(!prev){prev=f;return}
- blobs=[];
- for(let i=0;i<f.data.length;i+=80){
-  let d=Math.abs(f.data[i]-prev.data[i]);
-  if(d>35){
-   let px=(i/4)%b.w+b.x;
-   let py=Math.floor((i/4)/b.w)+b.y;
-   blobs.push({x:px,y:py});
+ if(!b) return [];
+ const {x,y,w,h}=b;
+ const frame=ctx.getImageData(x,y,w,h);
+ if(!prev){prev=frame; return []}
+
+ let binary=new Uint8Array(w*h);
+ for(let i=0;i<w*h;i++){
+  let diff=Math.abs(frame.data[i*4]-prev.data[i*4]);
+  binary[i]=diff>40?1:0;
+ }
+ prev=frame;
+
+ let visited=new Uint8Array(w*h);
+ let blobs=[];
+
+ function floodFill(idx){
+  let stack=[idx], points=[];
+  while(stack.length){
+   let i=stack.pop();
+   if(visited[i]||!binary[i]) continue;
+   visited[i]=1;
+   let px=i%w, py=Math.floor(i/w);
+   points.push({x:px,y:py});
+
+   let neighbors=[i-1,i+1,i-w,i+w];
+   neighbors.forEach(n=>{
+    if(n>=0 && n<w*h && !visited[n]) stack.push(n);
+   });
+  }
+  return points;
+ }
+
+ for(let i=0;i<w*h;i++){
+  if(binary[i] && !visited[i]){
+   let pts=floodFill(i);
+   if(pts.length>50){
+    let cx=pts.reduce((s,p)=>s+p.x,0)/pts.length + x;
+    let cy=pts.reduce((s,p)=>s+p.y,0)/pts.length + y;
+    blobs.push({cx,cy,size:pts.length});
+   }
   }
  }
- prev=f;
+ return blobs;
 }
 
-function group(){
- let groups=[];
- blobs.forEach(p=>{
-  let g=groups.find(g=>Math.hypot(g.cx-p.x,g.cy-p.y)<40);
-  if(g){g.points.push(p);g.cx=(g.cx+p.x)/2;g.cy=(g.cy+p.y)/2}
-  else groups.push({points:[p],cx:p.x,cy:p.y});
+// CONVEX HULL (Graham scan simplified)
+function hull(points){
+ if(points.length<3) return points;
+ points=points.slice().sort((a,b)=>a.x-b.x||a.y-b.y);
+ const cross=(o,a,b)=>(a.x-o.x)*(b.y-o.y)-(a.y-o.y)*(b.x-o.x);
+ let lower=[], upper=[];
+ for(let p of points){
+  while(lower.length>=2 && cross(lower[lower.length-2],lower[lower.length-1],p)<=0) lower.pop();
+  lower.push(p);
+ }
+ for(let i=points.length-1;i>=0;i--){
+  let p=points[i];
+  while(upper.length>=2 && cross(upper[upper.length-2],upper[upper.length-1],p)<=0) upper.pop();
+  upper.push(p);
+ }
+ upper.pop(); lower.pop();
+ return lower.concat(upper);
+}
+
+function draw(blobs){
+ // centroids
+ ctx.fillStyle='rgba(255,120,120,0.9)';
+ blobs.forEach(b=>{
+  ctx.beginPath();ctx.arc(b.cx,b.cy,5,0,Math.PI*2);ctx.fill();
  });
- return groups;
+
+ // mesh
+ ctx.strokeStyle='rgba(255,255,255,0.1)';
+ for(let i=0;i<blobs.length;i++){
+  for(let j=i+1;j<blobs.length;j++){
+   let d=Math.hypot(blobs[i].cx-blobs[j].cx,blobs[i].cy-blobs[j].cy);
+   if(d<200){ctx.beginPath();ctx.moveTo(blobs[i].cx,blobs[i].cy);
+   ctx.lineTo(blobs[j].cx,blobs[j].cy);ctx.stroke();}
+  }
+ }
+
+ // convex hull
+ let pts=blobs.map(b=>({x:b.cx,y:b.cy}));
+ let h=hull(pts);
+ if(h.length>2){
+  ctx.strokeStyle='rgba(0,200,255,0.7)';
+  ctx.beginPath();
+  h.forEach((p,i)=> i?ctx.lineTo(p.x,p.y):ctx.moveTo(p.x,p.y));
+  ctx.closePath();ctx.stroke();
+ }
 }
 
-function draw(groups){
- ctx.fillStyle='rgba(255,80,80,0.9)';
- groups.forEach(g=>{
-  ctx.beginPath();ctx.arc(g.cx,g.cy,6,0,Math.PI*2);ctx.fill();
- });
-}
+// --- AUDIO (harmonic mapping) ---
+let actx,osc1,osc2,noise,filter,gain;
+const scale=[0,3,5,7,10]; // minor pentatonic
 
-// AUDIO
-let actx,base,mod;
 document.body.onclick=()=>{
  if(!actx){
   actx=new AudioContext();
-  base=actx.createOscillator();
-  mod=actx.createGain();
-  base.frequency.value=110;
-  mod.gain.value=0.1;
-  base.connect(mod).connect(actx.destination);
-  base.start();
+  osc1=actx.createOscillator();
+  osc2=actx.createOscillator();
+  osc1.frequency.value=110;
+  osc2.frequency.value=111;
+
+  let buffer=actx.createBuffer(1,44100,44100);
+  let data=buffer.getChannelData(0);
+  for(let i=0;i<data.length;i++) data[i]=Math.random()*2-1;
+  noise=actx.createBufferSource(); noise.buffer=buffer; noise.loop=true;
+
+  filter=actx.createBiquadFilter(); filter.type='lowpass';
+  gain=actx.createGain(); gain.gain.value=0.08;
+
+  osc1.connect(filter); osc2.connect(filter); noise.connect(filter);
+  filter.connect(gain).connect(actx.destination);
+
+  osc1.start(); osc2.start(); noise.start();
  }
 }
 
-function sound(groups){
+function sound(blobs){
  if(!actx) return;
- let intensity=groups.length;
- mod.gain.value=0.05+intensity*0.01;
- base.frequency.value=110+intensity*5;
+ let intensity=blobs.length;
+
+ // pick pitch from position
+ if(blobs.length){
+  let avgX=blobs.reduce((s,b)=>s+b.cx,0)/blobs.length;
+  let noteIndex=Math.floor((avgX/canvas.width)*scale.length);
+  let freq=110*Math.pow(2,scale[noteIndex]/12);
+  osc1.frequency.value=freq;
+  osc2.frequency.value=freq*1.01;
+ }
+
+ filter.frequency.value=300+intensity*60;
+ gain.gain.value=0.05+intensity*0.01;
 }
 
 function loop(){
  ctx.clearRect(0,0,canvas.width,canvas.height);
  if(video.readyState>=2){
   let b=drawVideo();
-  detect(b);
-  let g=group();
-  draw(g);
-  sound(g);
+  let blobs=detect(b);
+  draw(blobs);
+  sound(blobs);
  }
  requestAnimationFrame(loop);
 }
@@ -130,8 +213,7 @@ loop();
 
 // RECORD
 let rec,chunks=[];
-recBtn=rec;stopBtn=stop;
-recBtn.onclick=()=>{
+rec.onclick=()=>{
  const s=canvas.captureStream();
  rec=new MediaRecorder(s);
  rec.ondataavailable=e=>chunks.push(e.data);
@@ -143,7 +225,7 @@ recBtn.onclick=()=>{
  };
  rec.start();
 };
-stopBtn.onclick=()=>{if(rec)rec.stop();};
+stop.onclick=()=>{if(rec)rec.stop();};
 </script>
 </body>
 </html>
