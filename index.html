@@ -3,16 +3,19 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>EchoMotion</title>
+<title>EchoMotion - Core Engine</title>
 <style>
 body { margin:0; background:#000; color:#fff; font-family:sans-serif; overflow:hidden; }
 canvas { display:block; }
 #ui {
   position:fixed; top:10px; left:10px;
   background:rgba(0,0,0,0.6);
-  padding:10px; border-radius:10px;
+  padding:12px; border-radius:10px;
+  width:240px;
 }
-label { display:block; font-size:12px; }
+label { font-size:12px; display:block; margin-top:8px; }
+input, select { width:100%; }
+button { margin-top:6px; width:100%; }
 </style>
 </head>
 <body>
@@ -21,15 +24,30 @@ label { display:block; font-size:12px; }
 <canvas id="canvas"></canvas>
 
 <div id="ui">
-<label>BPM <input type="range" min="60" max="140" value="90" id="bpm"></label>
-<label>Volume <input type="range" min="0" max="1" step="0.01" value="0.2" id="vol"></label>
-<select id="scale">
-<option value="pentatonic">Pentatonic</option>
-<option value="minor">Minor</option>
-<option value="major">Major</option>
-</select>
-<button onclick="startCamera()">Camera</button>
-<input type="file" id="fileInput">
+  <b>EchoMotion</b>
+
+  <label>Sensitivity
+    <input type="range" id="sensitivity" min="10" max="80" value="40">
+  </label>
+
+  <label>Min Blob Size
+    <input type="range" id="minSize" min="20" max="500" value="100">
+  </label>
+
+  <label>Trail Length
+    <input type="range" id="trail" min="2" max="30" value="10">
+  </label>
+
+  <label>Overlay
+    <select id="overlay">
+      <option value="none">None</option>
+      <option value="hull">Convex Hull</option>
+      <option value="delaunay">Delaunay</option>
+    </select>
+  </label>
+
+  <button onclick="startCamera()">Start Camera</button>
+  <input type="file" id="fileInput">
 </div>
 
 <script>
@@ -53,23 +71,59 @@ async function startCamera(){
 // FILE INPUT
 document.getElementById('fileInput').onchange = e => {
   const file = e.target.files[0];
-  video.src = URL.createObjectURL(file);
+  if(file){ video.src = URL.createObjectURL(file); }
 };
 
-// MOTION DETECTION
+// MOTION + BLOBS
 let prevFrame;
+
 function getBlobs(){
   ctx.drawImage(video,0,0,W,H);
-  let frame = ctx.getImageData(0,0,W,H);
-  let blobs = [];
+  const frame = ctx.getImageData(0,0,W,H);
+  const blobs = [];
+  const visited = new Uint8Array(W*H);
+
+  const threshold = +document.getElementById('sensitivity').value;
+
+  function idx(x,y){ return y*W+x; }
 
   if(prevFrame){
-    for(let i=0;i<frame.data.length;i+=4){
-      let diff = Math.abs(frame.data[i]-prevFrame.data[i]);
-      if(diff>40){
-        let x = (i/4)%W;
-        let y = Math.floor((i/4)/W);
-        blobs.push({x,y});
+    for(let y=0;y<H;y+=2){
+      for(let x=0;x<W;x+=2){
+        let i = (y*W + x)*4;
+        let diff = Math.abs(frame.data[i] - prevFrame.data[i]);
+
+        if(diff > threshold && !visited[idx(x,y)]){
+          let stack = [[x,y]];
+          let points = [];
+
+          while(stack.length){
+            let [sx,sy] = stack.pop();
+            if(sx<0||sy<0||sx>=W||sy>=H) continue;
+            let id = idx(sx,sy);
+            if(visited[id]) continue;
+
+            let si = (sy*W + sx)*4;
+            let d = Math.abs(frame.data[si] - prevFrame.data[si]);
+            if(d < threshold) continue;
+
+            visited[id]=1;
+            points.push([sx,sy]);
+
+            stack.push([sx+2,sy]);
+            stack.push([sx-2,sy]);
+            stack.push([sx,sy+2]);
+            stack.push([sx,sy-2]);
+          }
+
+          if(points.length > +document.getElementById('minSize').value){
+            let cx=0, cy=0;
+            points.forEach(p=>{ cx+=p[0]; cy+=p[1]; });
+            cx/=points.length; cy/=points.length;
+
+            blobs.push({cx, cy, points});
+          }
+        }
       }
     }
   }
@@ -78,64 +132,80 @@ function getBlobs(){
   return blobs;
 }
 
-// AUDIO
-const audioCtx = new (window.AudioContext||window.webkitAudioContext)();
+// TRAILS
+let history = [];
 
-const scales = {
-  pentatonic:[0,2,4,7,9],
-  minor:[0,2,3,5,7,8,10],
-  major:[0,2,4,5,7,9,11]
-};
-
-function midiToFreq(m){
-  return 440*Math.pow(2,(m-69)/12);
-}
-
-function play(freq, vol){
-  const o = audioCtx.createOscillator();
-  const g = audioCtx.createGain();
-  o.frequency.value = freq;
-  g.gain.value = vol;
-  o.connect(g);
-  g.connect(audioCtx.destination);
-  o.start();
-  o.stop(audioCtx.currentTime+0.2);
-}
-
-let lastBeat = 0;
-function processAudio(blobs){
-  let bpm = +document.getElementById('bpm').value;
-  let vol = +document.getElementById('vol').value;
-  let scale = scales[document.getElementById('scale').value];
-
-  let now = performance.now();
-  let interval = 60000/bpm;
-  if(now-lastBeat<interval) return;
-  lastBeat = now;
-
-  blobs.slice(0,10).forEach(b=>{
-    let idx = Math.floor((b.x/W)*scale.length);
-    let note = 48 + scale[idx%scale.length];
-    play(midiToFreq(note), vol);
-  });
+function updateHistory(blobs){
+  history.push(blobs.map(b=>({x:b.cx,y:b.cy})));
+  if(history.length > +document.getElementById('trail').value){
+    history.shift();
+  }
 }
 
 // DRAW
+function draw(blobs){
+  ctx.fillStyle='black';
+  ctx.fillRect(0,0,W,H);
+
+  // trails
+  ctx.strokeStyle='rgba(0,255,255,0.3)';
+  history.forEach((frame,i)=>{
+    ctx.beginPath();
+    frame.forEach(p=> ctx.lineTo(p.x,p.y));
+    ctx.stroke();
+  });
+
+  // blobs
+  ctx.fillStyle='white';
+  blobs.forEach(b=>{
+    ctx.beginPath();
+    ctx.arc(b.cx,b.cy,5,0,Math.PI*2);
+    ctx.fill();
+  });
+
+  // overlays
+  const mode = document.getElementById('overlay').value;
+
+  if(mode==='hull') drawHull(blobs);
+  if(mode==='delaunay') drawLines(blobs);
+}
+
+// HULL (simple)
+function drawHull(blobs){
+  if(blobs.length<3) return;
+  ctx.strokeStyle='yellow';
+  ctx.beginPath();
+  blobs.forEach((b,i)=>{
+    if(i===0) ctx.moveTo(b.cx,b.cy);
+    else ctx.lineTo(b.cx,b.cy);
+  });
+  ctx.closePath();
+  ctx.stroke();
+}
+
+// DELAUNAY APPROX
+function drawLines(blobs){
+  ctx.strokeStyle='lime';
+  blobs.forEach(a=>{
+    blobs.forEach(b=>{
+      if(a!==b){
+        ctx.beginPath();
+        ctx.moveTo(a.cx,a.cy);
+        ctx.lineTo(b.cx,b.cy);
+        ctx.stroke();
+      }
+    });
+  });
+}
+
+// LOOP
 function loop(){
   requestAnimationFrame(loop);
   if(video.readyState<2) return;
 
   let blobs = getBlobs();
-
-  ctx.fillStyle='black';
-  ctx.fillRect(0,0,W,H);
-
-  ctx.fillStyle='white';
-  blobs.forEach(b=>{
-    ctx.fillRect(b.x,b.y,2,2);
-  });
-
-  processAudio(blobs);
+  updateHistory(blobs);
+  draw(blobs);
 }
 
 loop();
