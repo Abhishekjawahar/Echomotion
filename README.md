@@ -121,7 +121,7 @@ echomotion/
 
 ---
 
-## 🙏 Credits
+## Credits
 
 Created by **Abhishek Jawahar**
 
