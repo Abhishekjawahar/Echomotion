@@ -871,6 +871,20 @@ input[type=color] { display: none; }
         <div class="note-display" id="note-display"></div>
         <div class="chord-display" id="chord-display">—</div>
       </div>
+
+      <!-- Base layer selector -->
+      <div style="margin-bottom:8px">
+        <div class="section-title" style="margin-bottom:4px">Base Layer</div>
+        <select class="scale-select" id="base-layer-select" onchange="setBaseLayer(this.value)" style="margin-bottom:4px">
+          <option value="drone_pad">Drone Pad — warm detuned sine layers</option>
+          <option value="pulse_bass">Pulse Bass — rhythmic sub-octave pulse</option>
+          <option value="deep_rumble">Deep Rumble — low atmospheric rumble</option>
+          <option value="crystal_shimmer">Crystal Shimmer — high airy overtones</option>
+          <option value="organ_swell">Organ Swell — slow-attack organ wash</option>
+          <option value="dark_strings">Dark Strings — bowed string texture</option>
+          <option value="none">— None (silence) —</option>
+        </select>
+      </div>
       <div class="slider-row">
         <div class="slider-item sound-slider">
           <span class="slider-label">Drone vol</span>
@@ -1309,6 +1323,11 @@ async function initAudio() {
   masterGain.gain.value = 0.80;
   masterGain.connect(audioCtx.destination);
 
+  // Dedicated beat/drum master gain (routes into masterGain)
+  beatMasterGain = audioCtx.createGain();
+  beatMasterGain.gain.value = beatParams.volume;
+  beatMasterGain.connect(masterGain);
+
   // Analyser for waveform
   analyserNode = audioCtx.createAnalyser();
   analyserNode.fftSize = 1024;
@@ -1411,7 +1430,146 @@ function retuneDrone() {
   }
 }
 
-// ── VOICE POOL (music-theory aware) ──────────
+// ── Base Layer Engine ─────────────────────────
+let baseLayerNodes = []; // all running nodes for current layer
+let currentBaseLayer = 'drone_pad';
+
+function stopBaseLayer() {
+  baseLayerNodes.forEach(n => {
+    try { if (n.gain) n.gain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.3); } catch(e){}
+    try { if (n.osc)  n.osc.stop(audioCtx.currentTime + 0.5); } catch(e){}
+    try { if (n.src)  n.src.stop(audioCtx.currentTime + 0.5); } catch(e){}
+  });
+  baseLayerNodes = [];
+  if (droneGain) droneGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.3);
+}
+
+function setBaseLayer(type) {
+  if (!audioCtx || !soundOn) { currentBaseLayer = type; return; }
+  currentBaseLayer = type;
+  stopBaseLayer();
+  if (type === 'none') return;
+
+  const scale  = SCALES[currentScale];
+  const rootHz = midiToHz(scale.root - 12);
+  const t = audioCtx.currentTime;
+
+  if (type === 'drone_pad') {
+    // Original drone — warm detuned layers
+    droneGain.gain.setTargetAtTime(soundParams.droneVol * 0.35, t, 1.2);
+    retuneDrone();
+    return;
+  }
+
+  if (type === 'pulse_bass') {
+    // Rhythmic sub-octave pulse synced loosely to BPM
+    const osc  = audioCtx.createOscillator();
+    const lfo  = audioCtx.createOscillator();
+    const lfog = audioCtx.createGain();
+    const g    = audioCtx.createGain();
+    osc.type = 'sine'; osc.frequency.value = rootHz * 0.5;
+    lfo.type = 'sine'; lfo.frequency.value = beatParams.bpm / 60; // 1 pulse per beat
+    lfog.gain.value = 0.35;
+    g.gain.value    = 0;
+    lfo.connect(lfog); lfog.connect(g.gain);
+    osc.connect(g);    g.connect(distNode);
+    osc.start(t); lfo.start(t);
+    g.gain.setTargetAtTime(soundParams.droneVol * 0.5, t, 1.5);
+    baseLayerNodes.push({ osc, gain: g }, { osc: lfo, gain: lfog });
+    return;
+  }
+
+  if (type === 'deep_rumble') {
+    // Low atmospheric rumble — filtered noise + sub sine
+    const rate = audioCtx.sampleRate;
+    const bufLen = rate * 4;
+    const nBuf = audioCtx.createBuffer(2, bufLen, rate);
+    for (let c = 0; c < 2; c++) {
+      const d = nBuf.getChannelData(c);
+      let last = 0;
+      for (let i = 0; i < bufLen; i++) { last = (last + (Math.random() * 2 - 1)) * 0.5; d[i] = last; }
+    }
+    const src  = audioCtx.createBufferSource();
+    const flt  = audioCtx.createBiquadFilter();
+    const g    = audioCtx.createGain();
+    src.buffer = nBuf; src.loop = true;
+    flt.type = 'lowpass'; flt.frequency.value = 120; flt.Q.value = 2;
+    g.gain.value = 0;
+    src.connect(flt); flt.connect(g); g.connect(distNode);
+    src.start(t);
+    g.gain.setTargetAtTime(soundParams.droneVol * 0.6, t, 2.0);
+    baseLayerNodes.push({ src, gain: g });
+    return;
+  }
+
+  if (type === 'crystal_shimmer') {
+    // High airy overtones — detuned high sines with tremolo
+    const freqs = [rootHz * 4, rootHz * 6, rootHz * 8, rootHz * 9];
+    freqs.forEach((f, i) => {
+      const osc  = audioCtx.createOscillator();
+      const lfo  = audioCtx.createOscillator();
+      const lfog = audioCtx.createGain();
+      const g    = audioCtx.createGain();
+      osc.type = 'sine'; osc.frequency.value = f;
+      osc.detune.value = (i % 2 === 0 ? 1 : -1) * (i + 1) * 6;
+      lfo.type = 'sine'; lfo.frequency.value = 3 + i * 0.7;
+      lfog.gain.value = 0.3;
+      g.gain.value = 0;
+      lfo.connect(lfog); lfog.connect(g.gain);
+      osc.connect(g);    g.connect(reverbNode);
+      osc.start(t); lfo.start(t);
+      g.gain.setTargetAtTime(soundParams.droneVol * 0.12, t, 2.5);
+      baseLayerNodes.push({ osc, gain: g }, { osc: lfo, gain: lfog });
+    });
+    return;
+  }
+
+  if (type === 'organ_swell') {
+    // Slow-attack organ using harmonic stack
+    const harmonics = [1, 2, 3, 4, 6];
+    harmonics.forEach((h, i) => {
+      const osc = audioCtx.createOscillator();
+      const g   = audioCtx.createGain();
+      osc.type = i === 0 ? 'sine' : 'triangle';
+      osc.frequency.value = rootHz * h;
+      g.gain.value = 0;
+      osc.connect(g); g.connect(reverbNode);
+      osc.start(t);
+      const vol = soundParams.droneVol * (0.35 / (i + 1));
+      g.gain.setTargetAtTime(vol, t, 3.5); // very slow attack
+      baseLayerNodes.push({ osc, gain: g });
+    });
+    return;
+  }
+
+  if (type === 'dark_strings') {
+    // Bowed string texture — sawtooth + intense vibrato + heavy reverb
+    const stringFreqs = [rootHz, rootHz * 1.5, rootHz * 2, rootHz * 3];
+    stringFreqs.forEach((f, i) => {
+      const osc  = audioCtx.createOscillator();
+      const vib  = audioCtx.createOscillator();
+      const vibg = audioCtx.createGain();
+      const flt  = audioCtx.createBiquadFilter();
+      const g    = audioCtx.createGain();
+      osc.type = 'sawtooth'; osc.frequency.value = f;
+      osc.detune.value = (Math.random() - 0.5) * 14;
+      vib.type = 'sine'; vib.frequency.value = 5.2 + i * 0.3;
+      vibg.gain.value = 6; // cents of vibrato
+      flt.type = 'lowpass'; flt.frequency.value = 1800;
+      g.gain.value = 0;
+      vib.connect(vibg); vibg.connect(osc.frequency);
+      osc.connect(flt); flt.connect(g); g.connect(reverbNode);
+      osc.start(t); vib.start(t);
+      g.gain.setTargetAtTime(soundParams.droneVol * 0.18, t, 2.0);
+      baseLayerNodes.push({ osc, gain: g }, { osc: vib, gain: vibg });
+    });
+    return;
+  }
+}
+
+function activateCurrentBaseLayer() {
+  setBaseLayer(currentBaseLayer);
+}
 function updateVoice(tid, blob, W, H) {
   if (!audioCtx || !soundOn) return;
 
@@ -1530,7 +1688,6 @@ async function toggleSound() {
     await initAudio();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     soundOn = true;
-    // Ring toggle — on state
     document.getElementById('sound-ring-wrap').classList.add('active');
     document.getElementById('sound-ring-label').textContent = 'SOUND ON';
     document.getElementById('sound-ring-label').style.color = 'var(--neon-purple)';
@@ -1538,10 +1695,11 @@ async function toggleSound() {
     document.getElementById('sound-ring-sub').style.color   = 'rgba(187,136,255,0.5)';
     document.getElementById('sound-badge').classList.add('active');
     document.getElementById('sound-label').textContent = 'Listening…';
-    retuneDrone();
+    activateCurrentBaseLayer();
   } else {
     soundOn = false;
     releaseAllVoices();
+    stopBaseLayer();
     if (droneGain) droneGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
     // Ring toggle — off state
     document.getElementById('sound-ring-wrap').classList.remove('active');
@@ -1557,7 +1715,13 @@ async function toggleSound() {
 function onScaleChange() {
   currentScale = document.getElementById('scale-select').value;
   renderNoteChips();
-  if (audioCtx && soundOn) retuneDrone();
+  if (audioCtx && soundOn) {
+    retuneDrone();
+    // Restart base layer at new root if it's not drone_pad (which retuneDrone handles)
+    if (currentBaseLayer !== 'drone_pad' && currentBaseLayer !== 'none') {
+      setBaseLayer(currentBaseLayer);
+    }
+  }
 }
 
 function renderNoteChips() {
@@ -2369,10 +2533,12 @@ const STEPS = 16;
 // ── Beat state ───────────────────────────────
 const beatParams = {
   bpm: 120,
+  volume: 0.80,
   motionGhostChance: 0.30,
   motionThreshold: 6,
 };
 let beatOn        = false;
+let beatMasterGain = null; // dedicated gain for all drum voices
 let beatScheduler = null;   // requestAnimationFrame id
 let nextBeatTime  = 0;      // audioCtx scheduled time of next step
 let currentStep   = 0;      // 0–15
@@ -2441,30 +2607,32 @@ const PRESETS = {
 };
 
 // ── Synthesis functions ──────────────────────
+function getBMG() { return beatMasterGain || masterGain; } // fallback if not init yet
+
 function synthKick(t, vel=1) {
   if (!audioCtx) return;
+  const bmg = getBMG();
   const osc = audioCtx.createOscillator();
   const g   = audioCtx.createGain();
   osc.frequency.setValueAtTime(160, t);
   osc.frequency.exponentialRampToValueAtTime(40, t + 0.25);
   g.gain.setValueAtTime(0.9 * vel, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.35);
-  osc.connect(g); g.connect(masterGain);
+  osc.connect(g); g.connect(bmg);
   osc.start(t); osc.stop(t + 0.36);
-  // click transient
   const buf = audioCtx.createBuffer(1, audioCtx.sampleRate * 0.02, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
   for (let i = 0; i < d.length; i++) d[i] = (Math.random()*2-1) * (1 - i/d.length);
   const src = audioCtx.createBufferSource();
   const ng  = audioCtx.createGain();
   src.buffer = buf; ng.gain.value = 0.4 * vel;
-  src.connect(ng); ng.connect(masterGain);
+  src.connect(ng); ng.connect(bmg);
   src.start(t);
 }
 
 function synthSnare(t, vel=1) {
   if (!audioCtx) return;
-  // noise body
+  const bmg = getBMG();
   const len = audioCtx.sampleRate * 0.18;
   const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
@@ -2475,20 +2643,20 @@ function synthSnare(t, vel=1) {
   flt.type = 'bandpass'; flt.frequency.value = 3500; flt.Q.value = 0.8;
   g.gain.setValueAtTime(0.7 * vel, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.18);
-  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(masterGain);
+  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(bmg);
   src.start(t);
-  // tonal body
   const osc = audioCtx.createOscillator();
   const og  = audioCtx.createGain();
   osc.frequency.value = 180;
   og.gain.setValueAtTime(0.4 * vel, t);
   og.gain.exponentialRampToValueAtTime(0.001, t + 0.1);
-  osc.connect(og); og.connect(masterGain);
+  osc.connect(og); og.connect(bmg);
   osc.start(t); osc.stop(t + 0.11);
 }
 
 function synthClosedHat(t, vel=1) {
   if (!audioCtx) return;
+  const bmg = getBMG();
   const len = audioCtx.sampleRate * 0.05;
   const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
@@ -2499,12 +2667,13 @@ function synthClosedHat(t, vel=1) {
   flt.type = 'highpass'; flt.frequency.value = 8000;
   g.gain.setValueAtTime(0.55 * vel, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.05);
-  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(masterGain);
+  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(bmg);
   src.start(t);
 }
 
 function synthOpenHat(t, vel=1) {
   if (!audioCtx) return;
+  const bmg = getBMG();
   const len = audioCtx.sampleRate * 0.28;
   const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
   const d = buf.getChannelData(0);
@@ -2515,12 +2684,13 @@ function synthOpenHat(t, vel=1) {
   flt.type = 'bandpass'; flt.frequency.value = 9000; flt.Q.value = 0.4;
   g.gain.setValueAtTime(0.45 * vel, t);
   g.gain.exponentialRampToValueAtTime(0.001, t + 0.28);
-  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(masterGain);
+  src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(bmg);
   src.start(t);
 }
 
 function synthCymbal(t, vel=1) {
   if (!audioCtx) return;
+  const bmg = getBMG();
   const freqs = [205, 310, 420, 685, 880, 1380];
   freqs.forEach(f => {
     const osc = audioCtx.createOscillator();
@@ -2530,13 +2700,14 @@ function synthCymbal(t, vel=1) {
     g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
     const flt = audioCtx.createBiquadFilter();
     flt.type = 'highpass'; flt.frequency.value = 6000;
-    osc.connect(flt); flt.connect(g); g.connect(masterGain);
+    osc.connect(flt); flt.connect(g); g.connect(bmg);
     osc.start(t); osc.stop(t + 0.91);
   });
 }
 
 function synthClap(t, vel=1) {
   if (!audioCtx) return;
+  const bmg = getBMG();
   [0, 0.008, 0.016].forEach(offset => {
     const len = audioCtx.sampleRate * 0.06;
     const buf = audioCtx.createBuffer(1, len, audioCtx.sampleRate);
@@ -2549,7 +2720,7 @@ function synthClap(t, vel=1) {
     const startT = t + offset;
     g.gain.setValueAtTime(0.55 * vel, startT);
     g.gain.exponentialRampToValueAtTime(0.001, startT + 0.07);
-    src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(masterGain);
+    src.buffer = buf; src.connect(flt); flt.connect(g); g.connect(bmg);
     src.start(startT);
   });
 }
@@ -2615,6 +2786,7 @@ function buildBeatsUI() {
     chip.onclick = () => {
       instEnabled[inst.id] = !instEnabled[inst.id];
       chip.classList.toggle('on', instEnabled[inst.id]);
+      // Re-render grid so disabled rows dim visually
       renderSeqGrid();
     };
     igrid.appendChild(chip);
@@ -2630,17 +2802,6 @@ function buildBeatsUI() {
     sc.appendChild(dot);
   }
 
-  // Text instrument select
-  const sel = document.getElementById('text-inst-select');
-  sel.innerHTML = '';
-  INSTRUMENTS.forEach(inst => {
-    const o = document.createElement('option');
-    o.value = inst.id; o.textContent = inst.label;
-    sel.appendChild(o);
-  });
-  sel.onchange = () => syncTextInput();
-  syncTextInput();
-
   renderSeqGrid();
 }
 
@@ -2650,13 +2811,15 @@ function renderSeqGrid() {
   INSTRUMENTS.forEach(inst => {
     const row = document.createElement('div');
     row.className = 'seq-row';
-    // label
+    const disabled = !instEnabled[inst.id];
+    // label — dim if instrument disabled
     const lbl = document.createElement('div');
-    lbl.className = 'seq-row-label' + (instEnabled[inst.id] ? ' active-inst' : '');
+    lbl.className = 'seq-row-label' + (!disabled ? ' active-inst' : '');
     lbl.style.setProperty('--inst-col', inst.col);
+    lbl.style.opacity = disabled ? '0.3' : '1';
     lbl.textContent = inst.label;
     row.appendChild(lbl);
-    // 16 step cells with group dividers
+    // 16 step cells
     for (let s = 0; s < STEPS; s++) {
       if (s > 0 && s % 4 === 0) {
         const div = document.createElement('div');
@@ -2666,17 +2829,30 @@ function renderSeqGrid() {
       const cell = document.createElement('div');
       cell.className = 'seq-toggle' + (patterns[inst.id][s] ? ' beat-on' : '');
       cell.style.setProperty('--inst-col', inst.col);
+      cell.style.opacity = disabled ? '0.25' : '1';
       cell.dataset.inst = inst.id;
       cell.dataset.step = s;
       cell.onclick = () => {
         patterns[inst.id][s] ^= 1;
         cell.classList.toggle('beat-on', !!patterns[inst.id][s]);
-        syncTextInput();
+        // Direct edit → switch preset label to Custom
+        markPresetCustom();
       };
       row.appendChild(cell);
     }
     grid.appendChild(row);
   });
+}
+
+function markPresetCustom() {
+  const sel = document.getElementById('beat-preset');
+  if (!sel) return;
+  // Enable and select the custom option
+  const customOpt = sel.querySelector('option[value="custom"]');
+  if (customOpt) {
+    customOpt.disabled = false;
+    sel.value = 'custom';
+  }
 }
 
 function updateStepUI(step) {
@@ -2691,29 +2867,8 @@ function updateStepUI(step) {
   });
 }
 
-function syncTextInput() {
-  const sel  = document.getElementById('text-inst-select');
-  const inp  = document.getElementById('text-pattern-input');
-  if (!sel || !inp) return;
-  const id   = sel.value;
-  inp.value  = Array.from(patterns[id]).map(v => v ? 'x' : '.').join(' ');
-}
-
-function applyTextPattern(raw) {
-  const sel = document.getElementById('text-inst-select');
-  if (!sel) return;
-  const id    = sel.value;
-  const tokens = raw.trim().split(/\s+/);
-  for (let s = 0; s < STEPS; s++) {
-    patterns[id][s] = (tokens[s] === 'x' || tokens[s] === 'X') ? 1 : 0;
-  }
-  // update grid cells for this instrument
-  document.querySelectorAll(`.seq-toggle[data-inst="${id}"]`).forEach(cell => {
-    cell.classList.toggle('beat-on', !!patterns[id][+cell.dataset.step]);
-  });
-}
-
 function applyPreset(name) {
+  if (name === 'custom') return; // custom is read-only state
   const p = PRESETS[name];
   if (!p) return;
   INSTRUMENTS.forEach(inst => {
@@ -2721,15 +2876,19 @@ function applyPreset(name) {
     if (src) patterns[inst.id].set(src);
     else patterns[inst.id].fill(0);
   });
-  renderSeqGrid();
-  syncTextInput();
+  renderSeqGrid(); // re-render full grid reflecting current kit toggles
 }
 
 function setBPM(v) {
   beatParams.bpm = v;
   document.getElementById('bpm-display').textContent = v;
-  // update delay node timing if audio is running
-  if (delayNode) delayNode.delayTime.setTargetAtTime(60/v/2, audioCtx.currentTime, 0.05);
+  if (delayNode && audioCtx) delayNode.delayTime.setTargetAtTime(60/v/2, audioCtx.currentTime, 0.05);
+}
+
+function setBeatVolume(v) {
+  beatParams.volume = v;
+  document.getElementById('v-beat-vol').textContent = Math.round(v*100)+'%';
+  if (beatMasterGain) beatMasterGain.gain.setTargetAtTime(v, audioCtx.currentTime, 0.05);
 }
 
 // ── Toggle beat engine ────────────────────────
@@ -2762,8 +2921,14 @@ async function toggleBeatEngine() {
 
 // ── Panel open/close ──────────────────────────
 function openBeatsPanel() {
-  buildBeatsUI();
-  applyPreset(document.getElementById('beat-preset').value);
+  buildBeatsUI(); // always rebuild DOM
+  const sel = document.getElementById('beat-preset');
+  // Only auto-apply preset if not in custom state
+  if (sel && sel.value !== 'custom') {
+    applyPreset(sel.value);
+  } else {
+    renderSeqGrid(); // just re-render grid from current pattern state
+  }
   document.getElementById('beats-panel').classList.add('open');
 }
 function closeBeatsPanel() {
@@ -2812,11 +2977,17 @@ loop();
       </div>
     </div>
 
-    <!-- BPM slider -->
+    <!-- BPM + Volume row -->
     <div class="beats-bpm-row">
       <span class="beats-bpm-label">BPM</span>
       <input type="range" min="60" max="200" value="120" id="sl-bpm" style="flex:1;height:3px;accent-color:var(--neon-amber);cursor:pointer"
              oninput="setBPM(+this.value)">
+    </div>
+    <div class="beats-bpm-row" style="margin-top:4px">
+      <span class="beats-bpm-label" style="color:#b0c0d8;font-size:10px">VOL</span>
+      <input type="range" min="0" max="100" value="80" id="sl-beat-vol" style="flex:1;height:3px;accent-color:var(--neon-amber);cursor:pointer"
+             oninput="setBeatVolume(+this.value/100)">
+      <span style="font-size:11px;font-weight:700;color:var(--neon-amber);width:36px;text-align:right;font-family:'Share Tech Mono',monospace" id="v-beat-vol">80%</span>
     </div>
 
     <!-- Preset selector -->
@@ -2829,6 +3000,7 @@ loop();
         <option value="breakbeat">Breakbeat</option>
         <option value="jazz">Jazz Brush</option>
         <option value="blank">— Blank (build your own) —</option>
+        <option value="custom" disabled style="color:#6a8aaa">✎ Custom</option>
       </select>
     </div>
 
@@ -2845,24 +3017,6 @@ loop();
     <div class="beats-section-label">Step Sequencer <span style="color:#3a5070;font-size:8px">(16 steps · 1 bar)</span></div>
     <div class="seq-grid" id="seq-grid">
       <!-- built by JS -->
-    </div>
-
-    <!-- Text pattern input per instrument -->
-    <div style="margin-bottom:10px">
-      <div class="beats-section-label" style="margin-bottom:4px">
-        Text Pattern
-        <span style="color:#3a5070;font-size:8px;margin-left:6px">x = hit · . = rest · select instrument above</span>
-      </div>
-      <div style="display:flex;align-items:center;gap:6px;margin-bottom:4px">
-        <select id="text-inst-select" style="
-          background:rgba(255,170,0,.05);border:1px solid rgba(255,170,0,.2);
-          border-radius:6px;padding:5px 8px;color:var(--neon-amber);
-          font-size:11px;font-family:'Share Tech Mono',monospace;outline:none;flex-shrink:0">
-        </select>
-        <input type="text" id="text-pattern-input" class="beats-pattern-input"
-               placeholder="x . x . x . x . x . x . x . x ."
-               oninput="applyTextPattern(this.value)">
-      </div>
     </div>
 
     <!-- Motion reactivity -->
