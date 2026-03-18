@@ -162,8 +162,6 @@ button:active { opacity: 0.7; transform: scale(0.97); }
 .btn-record.recording { background: rgba(255,69,58,0.15); color: #ff453a; border-color: #ff453a; }
 .btn-download { background: rgba(255,255,255,0.03); color: #4a5a7a; border-color: rgba(255,255,255,0.06); }
 .btn-download.ready { background: rgba(0,245,255,0.08); color: var(--neon-cyan); border-color: rgba(0,245,255,0.3); }
-.btn-sound     { background: rgba(187,136,255,0.1); color: var(--neon-purple); border-color: rgba(187,136,255,0.35); }
-.btn-sound.off { background: rgba(255,255,255,0.03); color: #4a5a7a; border-color: rgba(255,255,255,0.06); }
 
 /* ── SECTION TITLES ─────────────────────────── */
 .section-title {
@@ -352,7 +350,120 @@ input[type=color] { display: none; }
   min-height: 24px;
 }
 
-/* ── SCROLLBAR ──────────────────────────────── */
+/* ── PULSING RING SOUND TOGGLE ───────────────── */
+#sound-ring-wrap {
+  position: relative;
+  width: 64px; height: 64px;
+  flex-shrink: 0;
+  cursor: pointer;
+  display: flex; align-items: center; justify-content: center;
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* The three expanding rings */
+.sring {
+  position: absolute;
+  border-radius: 50%;
+  border: 1.5px solid var(--neon-purple);
+  opacity: 0;
+  pointer-events: none;
+}
+.sring-1 { width: 64px;  height: 64px;  }
+.sring-2 { width: 80px;  height: 80px;  border-color: rgba(187,136,255,0.5); }
+.sring-3 { width: 96px;  height: 96px;  border-color: rgba(187,136,255,0.25); }
+
+/* Rings animate only when sound is ON */
+#sound-ring-wrap.active .sring-1 {
+  animation: ringPulse1 2.2s ease-out infinite;
+}
+#sound-ring-wrap.active .sring-2 {
+  animation: ringPulse2 2.2s ease-out infinite 0.45s;
+}
+#sound-ring-wrap.active .sring-3 {
+  animation: ringPulse3 2.2s ease-out infinite 0.9s;
+}
+
+@keyframes ringPulse1 {
+  0%   { transform: scale(0.82); opacity: 0.9; }
+  70%  { transform: scale(1.05); opacity: 0.4; }
+  100% { transform: scale(1.15); opacity: 0;   }
+}
+@keyframes ringPulse2 {
+  0%   { transform: scale(0.75); opacity: 0.7; }
+  70%  { transform: scale(1.0);  opacity: 0.25; }
+  100% { transform: scale(1.1);  opacity: 0;   }
+}
+@keyframes ringPulse3 {
+  0%   { transform: scale(0.68); opacity: 0.5; }
+  70%  { transform: scale(0.95); opacity: 0.12; }
+  100% { transform: scale(1.05); opacity: 0;   }
+}
+
+/* Main disc */
+.sring-disc {
+  position: relative; z-index: 2;
+  width: 54px; height: 54px; border-radius: 50%;
+  background: rgba(8, 8, 20, 0.92);
+  border: 2px solid rgba(187,136,255,0.25);
+  display: flex; align-items: center; justify-content: center;
+  transition: border-color 0.35s, box-shadow 0.35s;
+}
+#sound-ring-wrap:hover .sring-disc {
+  border-color: rgba(187,136,255,0.5);
+}
+#sound-ring-wrap.active .sring-disc {
+  border-color: var(--neon-purple);
+  box-shadow: 0 0 18px rgba(187,136,255,0.35), inset 0 0 14px rgba(187,136,255,0.08);
+}
+#sound-ring-wrap:active .sring-disc {
+  transform: scale(0.93);
+}
+
+/* Waveform SVG colour & animation */
+#wave-line {
+  stroke: rgba(187,136,255,0.3);
+  transition: stroke 0.35s;
+}
+#sound-ring-wrap.active #wave-line {
+  stroke: var(--neon-purple);
+  animation: waveAnim 1.8s ease-in-out infinite;
+}
+/* When off — flatten to a horizontal line smoothly */
+#sound-ring-wrap:not(.active) #wave-line {
+  animation: waveFlatline 0.5s forwards;
+}
+
+@keyframes waveAnim {
+  0%, 100% { stroke-dashoffset: 0;   opacity: 1;   }
+  50%       { stroke-dashoffset: 12; opacity: 0.75; }
+}
+@keyframes waveFlatline {
+  to { d: path("M0,12 L44,12"); }
+}
+
+/* Corner hex accents on the disc when active */
+#sound-ring-wrap.active .sring-disc::before {
+  content: '';
+  position: absolute; inset: -5px;
+  border-radius: 50%;
+  background: conic-gradient(
+    rgba(187,136,255,0.6) 0deg,
+    transparent 60deg,
+    transparent 120deg,
+    rgba(187,136,255,0.4) 180deg,
+    transparent 240deg,
+    transparent 300deg,
+    rgba(187,136,255,0.6) 360deg
+  );
+  animation: spinAccent 4s linear infinite;
+  mask: radial-gradient(circle at center, transparent 22px, black 23px, black 27px, transparent 28px);
+  -webkit-mask: radial-gradient(circle at center, transparent 22px, black 23px, black 27px, transparent 28px);
+}
+@keyframes spinAccent {
+  from { transform: rotate(0deg); }
+  to   { transform: rotate(360deg); }
+}
+
 ::-webkit-scrollbar { width: 4px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: rgba(0,245,255,0.2); border-radius: 2px; }
@@ -439,8 +550,38 @@ input[type=color] { display: none; }
     <!-- Sound section -->
     <div>
       <div class="section-title">Sound Engine</div>
-      <div class="btn-row" style="margin-bottom:8px">
-        <button class="btn-sound off" id="btn-sound" onclick="toggleSound()">🔇 Sound Off</button>
+      <div style="display:flex;align-items:center;gap:14px;margin-bottom:10px">
+
+        <!-- ── PULSING RING TOGGLE ── -->
+        <div id="sound-ring-wrap" onclick="toggleSound()" title="Toggle Sound">
+          <!-- Outer pulse rings (animated when on) -->
+          <div class="sring sring-3"></div>
+          <div class="sring sring-2"></div>
+          <div class="sring sring-1"></div>
+          <!-- Main button disc -->
+          <div class="sring-disc">
+            <!-- Waveform SVG icon -->
+            <svg id="sound-wave-svg" viewBox="0 0 44 24" xmlns="http://www.w3.org/2000/svg" width="44" height="24">
+              <!-- static flat line when off; animated path when on via CSS -->
+              <polyline id="wave-line" points="0,12 5,12 8,4 11,20 14,6 17,18 20,9 23,15 26,3 29,21 32,7 35,17 38,12 44,12"
+                fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+          </div>
+        </div>
+
+        <!-- Status text beside the button -->
+        <div style="flex:1">
+          <div id="sound-ring-label" style="
+            font-family:'Share Tech Mono',monospace;
+            font-size:13px;font-weight:700;
+            color:#2a4060;letter-spacing:1px;
+            text-transform:uppercase;
+            transition:color 0.3s;">SOUND OFF</div>
+          <div id="sound-ring-sub" style="
+            font-size:10px;color:#1a2a3a;
+            font-family:'Share Tech Mono',monospace;
+            margin-top:2px;transition:color 0.3s;">tap to activate</div>
+        </div>
       </div>
       <div style="margin-bottom:6px">
         <select class="scale-select" id="scale-select" onchange="onScaleChange()">
@@ -612,7 +753,8 @@ input[type=color] { display: none; }
 // ─────────────────────────────────────────────
 const TRAIL_LEN   = 300;
 const MAX_VOICES  = 6;
-const WAVEFORM_POINTS = 180;
+// Waveform history — fewer points = faster draw
+const WAVEFORM_POINTS = 90;
 
 // ─────────────────────────────────────────────
 // COLOR SYSTEM
@@ -781,8 +923,11 @@ const soundParams = {
 const vid  = document.getElementById('vid');
 const cvs  = document.getElementById('overlay');
 const ctx  = cvs.getContext('2d', { willReadFrequently:true });
+// Two offscreen canvases: full-res for drawing, half-res for motion detection
 const offC = document.createElement('canvas');
 const offX = offC.getContext('2d', { willReadFrequently:true });
+const motC = document.createElement('canvas'); // half-res motion canvas
+const motX = motC.getContext('2d', { willReadFrequently:true });
 const wfCvs = document.getElementById('waveform-canvas');
 const wfCtx = wfCvs.getContext('2d');
 
@@ -856,47 +1001,32 @@ function makeDistCurve(amount) {
   return curve;
 }
 
-// Build a richer oscillator with harmonics (additive synthesis)
+// Lightweight 2-oscillator voice (sine + sub) — replaces heavy 4-osc version
 function buildRichOscillator(ctx, freq, harmonicStrength) {
-  // Main osc (sine base)
   const osc1 = ctx.createOscillator();
-  osc1.type = 'sine';
+  osc1.type = 'triangle'; // triangle is richer than sine, cheaper than sawtooth
   osc1.frequency.value = freq;
 
-  // 2nd harmonic (octave)
-  const osc2 = ctx.createOscillator();
-  osc2.type = 'sine';
-  osc2.frequency.value = freq * 2;
-
-  // 3rd harmonic (perfect 5th up one octave)
-  const osc3 = ctx.createOscillator();
-  osc3.type = 'triangle';
-  osc3.frequency.value = freq * 3;
-
-  // Sub oscillator
   const oscSub = ctx.createOscillator();
   oscSub.type = 'sine';
   oscSub.frequency.value = freq * 0.5;
 
-  const gain1   = ctx.createGain(); gain1.gain.value   = 0.55;
-  const gain2   = ctx.createGain(); gain2.gain.value   = 0.18 * harmonicStrength;
-  const gain3   = ctx.createGain(); gain3.gain.value   = 0.09 * harmonicStrength;
-  const gainSub = ctx.createGain(); gainSub.gain.value = 0.25;
+  const gain1   = ctx.createGain(); gain1.gain.value   = 0.60;
+  const gainSub = ctx.createGain(); gainSub.gain.value = 0.20 + harmonicStrength * 0.15;
 
   const mixGain = ctx.createGain(); mixGain.gain.value = 0;
 
-  osc1.connect(gain1); gain1.connect(mixGain);
-  osc2.connect(gain2); gain2.connect(mixGain);
-  osc3.connect(gain3); gain3.connect(mixGain);
+  osc1.connect(gain1);     gain1.connect(mixGain);
   oscSub.connect(gainSub); gainSub.connect(mixGain);
 
-  osc1.start(); osc2.start(); osc3.start(); oscSub.start();
+  osc1.start(); oscSub.start();
 
   return {
-    oscs: [osc1, osc2, osc3, oscSub],
-    gains: [gain1, gain2, gain3, gainSub],
-    gain2Node: gain2, gain3Node: gain3,
-    out: mixGain
+    oscs:      [osc1, oscSub],
+    gains:     [gain1, gainSub],
+    gain2Node: gain1,   // kept for compat
+    gain3Node: gainSub,
+    out:       mixGain
   };
 }
 
@@ -1130,8 +1260,12 @@ async function toggleSound() {
     await initAudio();
     if (audioCtx.state === 'suspended') await audioCtx.resume();
     soundOn = true;
-    document.getElementById('btn-sound').textContent = '🔊 Sound On';
-    document.getElementById('btn-sound').classList.remove('off');
+    // Ring toggle — on state
+    document.getElementById('sound-ring-wrap').classList.add('active');
+    document.getElementById('sound-ring-label').textContent = 'SOUND ON';
+    document.getElementById('sound-ring-label').style.color = 'var(--neon-purple)';
+    document.getElementById('sound-ring-sub').textContent   = 'listening…';
+    document.getElementById('sound-ring-sub').style.color   = 'rgba(187,136,255,0.5)';
     document.getElementById('sound-badge').classList.add('active');
     document.getElementById('sound-label').textContent = 'Listening…';
     retuneDrone();
@@ -1139,8 +1273,12 @@ async function toggleSound() {
     soundOn = false;
     releaseAllVoices();
     if (droneGain) droneGain.gain.setTargetAtTime(0, audioCtx.currentTime, 0.5);
-    document.getElementById('btn-sound').textContent = '🔇 Sound Off';
-    document.getElementById('btn-sound').classList.add('off');
+    // Ring toggle — off state
+    document.getElementById('sound-ring-wrap').classList.remove('active');
+    document.getElementById('sound-ring-label').textContent = 'SOUND OFF';
+    document.getElementById('sound-ring-label').style.color = '#2a4060';
+    document.getElementById('sound-ring-sub').textContent   = 'tap to activate';
+    document.getElementById('sound-ring-sub').style.color   = '#1a2a3a';
     document.getElementById('sound-badge').classList.remove('active');
     document.getElementById('sound-label').textContent = 'Sound off';
   }
@@ -1189,22 +1327,25 @@ function lightNoteChip(normX) {
 // ─────────────────────────────────────────────
 // WAVEFORM VISUALIZER
 // ─────────────────────────────────────────────
+let waveFrameSkip=0;
 function drawWaveform(blobs, W, H) {
   const wW = wfCvs.width;
   const wH = wfCvs.height;
 
-  // Push new waveform sample
+  // Read analyser only every 2nd frame
   let amp = 0;
-  if (analyserNode && soundOn) {
+  waveFrameSkip++;
+  if (analyserNode && soundOn && (waveFrameSkip&1)===0) {
     const buf = new Float32Array(analyserNode.fftSize);
     analyserNode.getFloatTimeDomainData(buf);
-    // RMS
     let sum = 0;
     for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
     amp = Math.sqrt(sum / buf.length);
+    waveHistory._lastAmp = amp;
+  } else {
+    amp = waveHistory._lastAmp || 0;
   }
 
-  // Also add motion energy from blobs
   let motionEnergy = blobs.reduce((s, b) => s + Math.min(1, b.area / 5000), 0) / Math.max(1, blobs.length);
   const totalAmp = Math.min(1, amp * 6 + motionEnergy * 0.3);
 
@@ -1213,21 +1354,12 @@ function drawWaveform(blobs, W, H) {
   wavePhase += 0.04;
 
   wfCtx.clearRect(0, 0, wW, wH);
-
   if (!soundOn && blobs.length === 0) return;
 
   const midY  = wH * 0.5;
   const segW  = wW / (WAVEFORM_POINTS - 1);
 
-  // Gradient fill
-  const grad = wfCtx.createLinearGradient(0, 0, wW, 0);
-  grad.addColorStop(0,    colorParams.blob + '00');
-  grad.addColorStop(0.15, colorParams.blob + 'aa');
-  grad.addColorStop(0.5,  colorParams.trail + 'cc');
-  grad.addColorStop(0.85, colorParams.blob + 'aa');
-  grad.addColorStop(1,    colorParams.blob + '00');
-
-  // Draw mirrored waveform
+  // Draw mirrored waveform — no shadowBlur
   for (let mirror = 0; mirror < 2; mirror++) {
     const sign = mirror === 0 ? -1 : 1;
 
@@ -1241,11 +1373,9 @@ function drawWaveform(blobs, W, H) {
     }
     wfCtx.lineTo(wW, midY);
     wfCtx.closePath();
-
-    wfCtx.fillStyle = gradient_with_alpha(colorParams.blob, mirror === 0 ? 0.18 : 0.12);
+    wfCtx.fillStyle = gradient_with_alpha(mirror===0?colorParams.blob:colorParams.trail, 0.10);
     wfCtx.fill();
 
-    // Stroke the line
     wfCtx.beginPath();
     for (let i = 0; i < waveHistory.length; i++) {
       const h    = waveHistory[i];
@@ -1256,36 +1386,30 @@ function drawWaveform(blobs, W, H) {
     }
     wfCtx.strokeStyle = mirror === 0 ? colorParams.blob : colorParams.trail;
     wfCtx.lineWidth   = 1.5;
-    wfCtx.globalAlpha = 0.75 + totalAmp * 0.25;
-    wfCtx.shadowColor = mirror === 0 ? colorParams.blob : colorParams.trail;
-    wfCtx.shadowBlur  = 8 + totalAmp * 12 * colorParams.glow;
+    wfCtx.globalAlpha = 0.70 + totalAmp * 0.30;
     wfCtx.stroke();
     wfCtx.globalAlpha = 1;
-    wfCtx.shadowBlur  = 0;
   }
 
   // Center line
   wfCtx.beginPath();
   wfCtx.moveTo(0, midY); wfCtx.lineTo(wW, midY);
-  wfCtx.strokeStyle = colorParams.blob + '33';
+  wfCtx.strokeStyle = colorParams.blob + '22';
   wfCtx.lineWidth   = 0.5;
   wfCtx.stroke();
 
-  // Blob frequency markers
+  // Blob markers
   for (const b of blobs) {
     const x = (b.cx / (W || 1)) * wW;
     const h = b.area / 8000;
     wfCtx.beginPath();
-    wfCtx.moveTo(x, midY - h * wH * 0.4);
-    wfCtx.lineTo(x, midY + h * wH * 0.4);
+    wfCtx.moveTo(x, midY - h * wH * 0.38);
+    wfCtx.lineTo(x, midY + h * wH * 0.38);
     wfCtx.strokeStyle = colorParams.blob;
     wfCtx.lineWidth   = 1.5;
-    wfCtx.globalAlpha = 0.55;
-    wfCtx.shadowColor = colorParams.blob;
-    wfCtx.shadowBlur  = 6;
+    wfCtx.globalAlpha = 0.45;
     wfCtx.stroke();
     wfCtx.globalAlpha = 1;
-    wfCtx.shadowBlur  = 0;
   }
 }
 
@@ -1443,26 +1567,46 @@ function matchBlobs(prev, centroids) {
 // ─────────────────────────────────────────────
 // MOTION DETECTION
 // ─────────────────────────────────────────────
+// Downsample 2x: process every other pixel for motion mask, then upscale result
 function getMotionMask(curr, prev, W, H, thr) {
   const m = new Uint8Array(W*H);
-  for (let i=0;i<W*H;i++) {
-    const p=i*4;
-    const lc=0.299*curr[p]+0.587*curr[p+1]+0.114*curr[p+2];
-    const lp=0.299*prev[p]+0.587*prev[p+1]+0.114*prev[p+2];
-    m[i]=Math.abs(lc-lp)>thr?255:0;
+  const step = 2; // sample every 2nd pixel
+  for (let y=0;y<H;y+=step) {
+    for (let x=0;x<W;x+=step) {
+      const p=(y*W+x)*4;
+      const lc=0.299*curr[p]+0.587*curr[p+1]+0.114*curr[p+2];
+      const lp=0.299*prev[p]+0.587*prev[p+1]+0.114*prev[p+2];
+      const v=Math.abs(lc-lp)>thr?255:0;
+      // fill 2x2 block
+      m[y*W+x]=v;
+      if(x+1<W) m[y*W+x+1]=v;
+      if(y+1<H){ m[(y+1)*W+x]=v; if(x+1<W) m[(y+1)*W+x+1]=v; }
+    }
   }
   return m;
 }
+// Fast separable dilation: horizontal pass then vertical pass — O(W*H*r) instead of O(W*H*r²)
 function dilateMask(m,W,H,r=4) {
-  const o=new Uint8Array(W*H);
-  for(let y=0;y<H;y++) for(let x=0;x<W;x++) {
-    let f=false;
-    outer: for(let dy=-r;dy<=r;dy++) for(let dx=-r;dx<=r;dx++){
-      const nx=x+dx,ny=y+dy;
-      if(nx<0||nx>=W||ny<0||ny>=H) continue;
-      if(m[ny*W+nx]===255){f=true;break outer;}
+  const tmp=new Uint8Array(W*H);
+  // Horizontal pass
+  for(let y=0;y<H;y++){
+    const row=y*W;
+    for(let x=0;x<W;x++){
+      const x0=Math.max(0,x-r), x1=Math.min(W-1,x+r);
+      let f=0;
+      for(let xx=x0;xx<=x1;xx++){ if(m[row+xx]===255){f=1;break;} }
+      tmp[row+x]=f?255:0;
     }
-    o[y*W+x]=f?255:0;
+  }
+  // Vertical pass
+  const o=new Uint8Array(W*H);
+  for(let x=0;x<W;x++){
+    for(let y=0;y<H;y++){
+      const y0=Math.max(0,y-r), y1=Math.min(H-1,y+r);
+      let f=0;
+      for(let yy=y0;yy<=y1;yy++){ if(tmp[yy*W+x]===255){f=1;break;} }
+      o[y*W+x]=f?255:0;
+    }
   }
   return o;
 }
@@ -1472,15 +1616,16 @@ function findBlobs(m,W,H,minA,maxA) {
     const si=sy*W+sx;
     if(m[si]!==255||vis[si]) continue;
     const q=[si]; vis[si]=1;
-    let mnx=sx,mxx=sx,mny=sy,mxy=sy,px=0;
-    while(q.length){
-      const i=q.shift(), qx=i%W, qy=(i-qx)/W;
+    let mnx=sx,mxx=sx,mny=sy,mxy=sy,px=0,qi=0;
+    while(qi<q.length){
+      const i=q[qi++]; const qx=i%W, qy=(i-qx)/W;
       px++; mnx=Math.min(mnx,qx); mxx=Math.max(mxx,qx);
       mny=Math.min(mny,qy); mxy=Math.max(mxy,qy);
-      for(const n of [i-1,i+1,i-W,i+W]){
-        if(n<0||n>=W*H||vis[n]||m[n]!==255) continue;
-        vis[n]=1; q.push(n);
-      }
+      const n0=i-1,n1=i+1,n2=i-W,n3=i+W;
+      if(n0>=0&&!vis[n0]&&m[n0]===255){vis[n0]=1;q.push(n0);}
+      if(n1<W*H&&!vis[n1]&&m[n1]===255){vis[n1]=1;q.push(n1);}
+      if(n2>=0&&!vis[n2]&&m[n2]===255){vis[n2]=1;q.push(n2);}
+      if(n3<W*H&&!vis[n3]&&m[n3]===255){vis[n3]=1;q.push(n3);}
     }
     const bw=mxx-mnx+1,bh=mxy-mny+1;
     if(px<minA||px>maxA) continue;
@@ -1523,9 +1668,7 @@ function drawHull(c2,blobs){
   const gcx=pts.reduce((s,p)=>s+p[0],0)/pts.length;
   const gcy=pts.reduce((s,p)=>s+p[1],0)/pts.length;
   const col = colorParams.hull;
-  const alpha = colorParams.alpha;
   c2.strokeStyle=col+'cc'; c2.fillStyle=col; c2.lineWidth=1.5;
-  c2.shadowColor=col; c2.shadowBlur=6*colorParams.glow;
   for(const b of blobs){
     c2.beginPath(); c2.moveTo(b.cx,b.cy); c2.lineTo(gcx,gcy); c2.stroke();
   }
@@ -1536,58 +1679,52 @@ function drawHull(c2,blobs){
     for(let i=1;i<h.length;i++) c2.lineTo(h[i][0],h[i][1]);
     c2.closePath(); c2.stroke();
   }
-  c2.shadowBlur=0;
 }
 
 // ─────────────────────────────────────────────
 // VORONOI
 // ─────────────────────────────────────────────
+// Cached Voronoi state
+let voroCanvas=null,voroCtx2=null,voroImageData=null,voroGrid=null,voroSW=0,voroSH=0;
 function drawVoronoi(c2,blobs,W,H){
   if(blobs.length<2) return;
-  const S=4, sw=Math.ceil(W/S), sh=Math.ceil(H/S);
-  const vc=document.createElement('canvas'); vc.width=sw; vc.height=sh;
-  const vx=vc.getContext('2d');
-  // Use colorParams for voronoi colors
-  const baseCol = colorParams.voro;
-  const id=new ImageData(sw,sh);
-  const blobColors = blobs.map((_,i) => {
-    const hue = (parseInt(baseCol.slice(1),16) >> 16 + i * 40) % 360;
-    return hexToRgb(baseCol + '30');
-  });
+  const S=8; // larger cell = much faster (8x8 grid cells)
+  const sw=Math.ceil(W/S), sh=Math.ceil(H/S);
+  if(!voroCanvas||voroSW!==sw||voroSH!==sh){
+    voroSW=sw; voroSH=sh;
+    voroCanvas=document.createElement('canvas'); voroCanvas.width=sw; voroCanvas.height=sh;
+    voroCtx2=voroCanvas.getContext('2d');
+    voroImageData=voroCtx2.createImageData(sw,sh);
+    voroGrid=new Int16Array(sw*sh);
+  }
+  const base=hexToRgb(colorParams.voro);
+  const alpha=Math.round(55*colorParams.alpha);
+  const da=voroImageData.data;
   for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
     let bd=Infinity,bc=0;
+    const px2=x*S, py2=y*S;
     for(let i=0;i<blobs.length;i++){
-      const d=Math.hypot(x*S-blobs[i].cx, y*S-blobs[i].cy);
-      if(d<bd){bd=d;bc=i;}
+      const dx=px2-blobs[i].cx, dy=py2-blobs[i].cy;
+      const d2=dx*dx+dy*dy; // squared distance, no sqrt
+      if(d2<bd){bd=d2;bc=i;}
     }
-    const col = hexToRgb(baseCol + Math.floor(colorParams.alpha * 0x33).toString(16).padStart(2,'0'));
-    const hueShift = (bc * 47) % 255;
+    voroGrid[y*sw+x]=bc;
+    const hue=(bc*47)&255;
     const p=(y*sw+x)*4;
-    id.data[p]   = Math.min(255, col[0] + hueShift * 0.3);
-    id.data[p+1] = Math.min(255, col[1]);
-    id.data[p+2] = Math.min(255, col[2] + hueShift * 0.2);
-    id.data[p+3] = Math.round(60 * colorParams.alpha);
+    da[p]  =Math.min(255,(base[0]+(hue*0.3))|0);
+    da[p+1]=base[1];
+    da[p+2]=Math.min(255,(base[2]+(hue*0.2))|0);
+    da[p+3]=alpha;
   }
-  vx.putImageData(id,0,0);
-  c2.save(); c2.globalAlpha=0.60*colorParams.alpha;
-  c2.imageSmoothingEnabled=false;
-  c2.shadowColor=colorParams.voro; c2.shadowBlur=4*colorParams.glow;
-  c2.drawImage(vc,0,0,W,H);
+  voroCtx2.putImageData(voroImageData,0,0);
+  c2.save(); c2.globalAlpha=0.55*colorParams.alpha; c2.imageSmoothingEnabled=false;
+  c2.drawImage(voroCanvas,0,0,W,H);
   c2.restore();
-  c2.strokeStyle=colorParams.voro+'88'; c2.lineWidth=0.5;
-  const grid=new Int16Array(sw*sh);
-  for(let y=0;y<sh;y++) for(let x=0;x<sw;x++){
-    let bc=0,bd=Infinity;
-    for(let i=0;i<blobs.length;i++){
-      const d=Math.hypot(x*S-blobs[i].cx, y*S-blobs[i].cy);
-      if(d<bd){bd=d;bc=i;}
-    }
-    grid[y*sw+x]=bc;
-  }
+  c2.strokeStyle=colorParams.voro+'55'; c2.lineWidth=0.5;
   c2.beginPath();
   for(let y=0;y<sh-1;y++) for(let x=0;x<sw-1;x++){
-    const c=grid[y*sw+x];
-    if(grid[y*sw+x+1]!==c||grid[(y+1)*sw+x]!==c){
+    const cv=voroGrid[y*sw+x];
+    if(voroGrid[y*sw+x+1]!==cv||voroGrid[(y+1)*sw+x]!==cv){
       c2.moveTo(x*S,y*S); c2.lineTo((x+1)*S,y*S);
     }
   }
@@ -1606,12 +1743,11 @@ function hexToRgb(hex){
 // ─────────────────────────────────────────────
 function drawForceField(c2,blobs,W,H){
   if(!blobs.length) return;
-  const step=28; const col=colorParams.force;
-  c2.strokeStyle=col+'cc'; c2.fillStyle=col+'cc'; c2.lineWidth=0.8;
-  c2.shadowColor=col; c2.shadowBlur=5*colorParams.glow;
+  const step=32; const col=colorParams.force;
+  c2.strokeStyle=col+'bb'; c2.fillStyle=col+'bb'; c2.lineWidth=0.8;
   for(let y=step/2;y<H;y+=step) for(let x=step/2;x<W;x+=step){
     let fx=0,fy=0;
-    for(const b of blobs){ const dx=b.cx-x,dy=b.cy-y; const d2=dx*dx+dy*dy+1; const f=3000/d2; fx+=f*dx/Math.sqrt(d2); fy+=f*dy/Math.sqrt(d2); }
+    for(const b of blobs){ const dx=b.cx-x,dy=b.cy-y; const d2=dx*dx+dy*dy+1; const f=3000/d2; const inv=1/Math.sqrt(d2); fx+=f*dx*inv; fy+=f*dy*inv; }
     const mag=Math.hypot(fx,fy); if(mag<0.3) continue;
     const sc=Math.min(12,mag); const nx=fx/mag,ny=fy/mag;
     const ex=x+nx*sc,ey=y+ny*sc;
@@ -1623,7 +1759,6 @@ function drawForceField(c2,blobs,W,H){
     c2.lineTo(ex-5*Math.cos(angle+0.4),ey-5*Math.sin(angle+0.4));
     c2.closePath(); c2.fill();
   }
-  c2.shadowBlur=0;
 }
 
 // ─────────────────────────────────────────────
@@ -1639,7 +1774,6 @@ function drawLissajous(c2,blobs,W,H){
     if(lh.xs.length<5) continue;
     const col=colorParams.lissa;
     c2.strokeStyle=col+'88'; c2.lineWidth=0.8;
-    c2.shadowColor=col; c2.shadowBlur=4*colorParams.glow;
     c2.beginPath();
     for(let i=0;i<lh.xs.length;i++){
       const x2=b.cx+(lh.xs[i]-b.cx)*0.7;
@@ -1647,7 +1781,6 @@ function drawLissajous(c2,blobs,W,H){
       i===0?c2.moveTo(x2,y2):c2.lineTo(x2,y2);
     }
     c2.stroke();
-    c2.shadowBlur=0;
   }
 }
 
@@ -1683,14 +1816,12 @@ function drawDelaunay(c2,blobs){
   const pts=blobs.map(b=>[b.cx,b.cy]);
   const tris=delaunay(pts);
   const col=colorParams.dela;
-  c2.strokeStyle=col+'99'; c2.fillStyle=col+'11'; c2.lineWidth=0.8;
-  c2.shadowColor=col; c2.shadowBlur=4*colorParams.glow;
+  c2.strokeStyle=col+'99'; c2.fillStyle=col+'0d'; c2.lineWidth=0.8;
   for(const t of tris){
     c2.beginPath(); c2.moveTo(t[0][0],t[0][1]);
     c2.lineTo(t[1][0],t[1][1]); c2.lineTo(t[2][0],t[2][1]);
     c2.closePath(); c2.fill(); c2.stroke();
   }
-  c2.shadowBlur=0;
 }
 
 // ─────────────────────────────────────────────
@@ -1720,14 +1851,12 @@ function drawFourierRings(c2){
     const alpha=1-(r.r/r.maxR);
     c2.strokeStyle=col+Math.floor(alpha*0.7*255).toString(16).padStart(2,'0');
     c2.lineWidth=0.9;
-    c2.shadowColor=col; c2.shadowBlur=6*colorParams.glow*alpha;
     c2.beginPath(); c2.arc(r.x,r.y,r.r,0,Math.PI*2); c2.stroke();
     if(r.r>10){
       c2.strokeStyle=col+Math.floor(alpha*0.3*255).toString(16).padStart(2,'0');
       c2.beginPath(); c2.arc(r.x,r.y,r.r*0.5,0,Math.PI*2); c2.stroke();
     }
   }
-  c2.shadowBlur=0;
 }
 
 // ─────────────────────────────────────────────
@@ -1769,25 +1898,33 @@ function stepRD(steps=3){
     rdA.set(nA); rdB.set(nB);
   }
 }
+// Cached RD canvas — allocated once, reused every frame
+let rdCanvas=null, rdCtx2=null, rdImageData=null;
 function drawRD(c2,W,H){
   if(!rdA||!rdB) return;
-  const id=new ImageData(rdW,rdH);
-  const ca=hexToRgb(colorParams.rdiff_a);
-  const cb=hexToRgb(colorParams.rdiff_b);
-  for(let i=0;i<rdW*rdH;i++){
-    const p=i*4;
-    id.data[p]  =Math.round(rdB[i]*cb[0]);
-    id.data[p+1]=Math.round(rdA[i]*ca[1]*0.5+rdB[i]*cb[1]);
-    id.data[p+2]=Math.round(rdA[i]*ca[2]*0.4+rdB[i]*cb[2]);
-    id.data[p+3]=Math.round(rdB[i]*180*colorParams.alpha);
+  // Allocate once
+  if(!rdCanvas||rdCanvas.width!==rdW||rdCanvas.height!==rdH){
+    rdCanvas=document.createElement('canvas');
+    rdCanvas.width=rdW; rdCanvas.height=rdH;
+    rdCtx2=rdCanvas.getContext('2d');
+    rdImageData=rdCtx2.createImageData(rdW,rdH);
   }
-  const tc=document.createElement('canvas');
-  tc.width=rdW; tc.height=rdH;
-  tc.getContext('2d').putImageData(id,0,0);
+  const d=rdImageData.data;
+  const cb0=hexToRgb(colorParams.rdiff_b);
+  const ca1=hexToRgb(colorParams.rdiff_a)[1];
+  const ca2=hexToRgb(colorParams.rdiff_a)[2];
+  const alpha180=Math.round(180*colorParams.alpha);
+  for(let i=0;i<rdW*rdH;i++){
+    const p=i*4, bv=rdB[i], av=rdA[i];
+    d[p]  =Math.round(bv*cb0[0]);
+    d[p+1]=Math.round(av*ca1*0.5+bv*cb0[1]);
+    d[p+2]=Math.round(av*ca2*0.4+bv*cb0[2]);
+    d[p+3]=Math.round(bv*alpha180);
+  }
+  rdCtx2.putImageData(rdImageData,0,0);
   c2.save(); c2.globalAlpha=0.80*colorParams.alpha;
   c2.imageSmoothingEnabled=true;
-  c2.shadowColor=colorParams.rdiff_a; c2.shadowBlur=6*colorParams.glow;
-  c2.drawImage(tc,0,0,W,H);
+  c2.drawImage(rdCanvas,0,0,W,H);
   c2.restore();
 }
 
@@ -1813,18 +1950,22 @@ function loop(){
   if(!vid.videoWidth||vid.readyState<2) return;
 
   const W=vid.videoWidth, H=vid.videoHeight;
+  const MW=W>>1, MH=H>>1; // half-res for motion detection
   if(cvs.width!==W||cvs.height!==H){
     cvs.width=W; cvs.height=H;
     offC.width=W; offC.height=H;
+    motC.width=MW; motC.height=MH;
     if(ovs.rdiff) initRD();
   }
-  // Match waveform canvas to container
   const vw=cvs.parentElement;
   if(wfCvs.width!==vw.clientWidth) wfCvs.width=vw.clientWidth;
   if(wfCvs.height!==64) wfCvs.height=64;
 
+  // Draw full-res to offC for display
   offX.drawImage(vid,0,0,W,H);
-  const curr=offX.getImageData(0,0,W,H);
+  // Draw half-res to motC for cheap pixel reads
+  motX.drawImage(vid,0,0,MW,MH);
+  const curr=motX.getImageData(0,0,MW,MH);
 
   // FPS
   frameCount++;
@@ -1837,17 +1978,25 @@ function loop(){
   const thr=Math.max(1,60-sliders.sensitivity);
   let blobs=[];
   if(prevFrame){
-    let mask=getMotionMask(curr.data,prevFrame.data,W,H,thr);
-    mask=dilateMask(mask,W,H,4);
-    blobs=findBlobs(mask,W,H,sliders.minsize,sliders.maxsize);
+    let mask=getMotionMask(curr.data,prevFrame.data,MW,MH,thr);
+    mask=dilateMask(mask,MW,MH,2);
+    const rawBlobs=findBlobs(mask,MW,MH,sliders.minsize>>2,sliders.maxsize>>2);
+    // Scale coords back to full resolution
+    blobs=rawBlobs.map(b=>({
+      x:b.x*2,y:b.y*2,w:b.w*2,h:b.h*2,
+      cx:b.cx*2,cy:b.cy*2,area:b.area*4
+    }));
   }
   if(!prevFrame) prevFrame=curr;
-  else { for(let i=0;i<curr.data.length;i++) prevFrame.data[i]=prevFrame.data[i]*0.7+curr.data[i]*0.3; }
+  else {
+    const pd=prevFrame.data,cd=curr.data,len=cd.length;
+    for(let i=0;i<len;i++) pd[i]=pd[i]*0.7+cd[i]*0.3;
+  }
 
   const prevBlobs=Object.values(blobTrails).map(t=>t[t.length-1]).filter(Boolean);
   blobTrails=matchBlobs(blobTrails, blobs.map(b=>[b.cx,b.cy]));
 
-  if(ovs.rdiff){ if(!rdA) initRD(); seedRD(blobs,W,H); stepRD(3); }
+  if(ovs.rdiff){ if(!rdA) initRD(); seedRD(blobs,W,H); if((frameCount&1)===0) stepRD(1); }
   if(ovs.fourier) updateFourierRings(blobs,prevBlobs);
 
   // SOUND UPDATE
@@ -1871,9 +2020,9 @@ function loop(){
   // WAVEFORM
   drawWaveform(blobs, W, H);
 
-  // DRAW
+  // DRAW — composite from full-res offscreen buffer
   ctx.clearRect(0,0,W,H);
-  ctx.drawImage(vid,0,0,W,H);
+  ctx.drawImage(offC,0,0);
 
   if(ovs.rdiff) drawRD(ctx,W,H);
   if(ovs.voro&&blobs.length>=2) drawVoronoi(ctx,blobs,W,H);
@@ -1892,42 +2041,28 @@ function loop(){
     }
 
   // Blob boxes + labels
+  ctx.lineWidth=1.5;
   for(let i=0;i<blobs.length;i++){
     const b=blobs[i];
     const isOv=ovSet.has(i);
     const col=isOv?colorParams.overlap:colorParams.blob;
-    const glowColor=isOv?colorParams.overlap:colorParams.blob;
-
-    ctx.shadowColor=glowColor;
-    ctx.shadowBlur=8*colorParams.glow;
-    ctx.strokeStyle=col; ctx.lineWidth=1.5;
+    ctx.strokeStyle=col;
     ctx.strokeRect(b.x,b.y,b.w,b.h);
-
-    // Corner brackets
-    ctx.lineWidth=2.5;
     const t=10;
-    for(const [cx2,cy2,dx,dy] of [
-      [b.x,b.y,1,1],[b.x+b.w,b.y,-1,1],
-      [b.x,b.y+b.h,1,-1],[b.x+b.w,b.y+b.h,-1,-1]
-    ]){
-      ctx.beginPath();
-      ctx.moveTo(cx2,cy2); ctx.lineTo(cx2+dx*t,cy2);
-      ctx.moveTo(cx2,cy2); ctx.lineTo(cx2,cy2+dy*t);
-      ctx.stroke();
-    }
-    ctx.shadowBlur=0;
-
-    if(isOv){
-      ctx.fillStyle=colorParams.overlap;
-      ctx.font='bold 10px "Share Tech Mono",monospace';
-      ctx.fillText('OVERLAP',b.x,b.y-6);
-    }
-
-    const lbl=`#${i+1}  ${b.cx},${b.cy}`;
-    let lx=b.x+b.w+8; const ly=b.y+14;
-    ctx.font='10px "Share Tech Mono",monospace';
+    ctx.lineWidth=2.5;
+    ctx.beginPath();
+    ctx.moveTo(b.x,b.y+t);         ctx.lineTo(b.x,b.y);         ctx.lineTo(b.x+t,b.y);
+    ctx.moveTo(b.x+b.w-t,b.y);     ctx.lineTo(b.x+b.w,b.y);     ctx.lineTo(b.x+b.w,b.y+t);
+    ctx.moveTo(b.x,b.y+b.h-t);     ctx.lineTo(b.x,b.y+b.h);     ctx.lineTo(b.x+t,b.y+b.h);
+    ctx.moveTo(b.x+b.w-t,b.y+b.h); ctx.lineTo(b.x+b.w,b.y+b.h); ctx.lineTo(b.x+b.w,b.y+b.h-t);
+    ctx.stroke();
+    ctx.lineWidth=1.5;
+    if(isOv){ ctx.fillStyle=colorParams.overlap; ctx.font='bold 10px monospace'; ctx.fillText('OVERLAP',b.x,b.y-5); }
+    const lbl=`#${i+1} ${b.cx},${b.cy}`;
+    let lx=b.x+b.w+6; const ly=b.y+13;
+    ctx.font='10px monospace';
     const tw=ctx.measureText(lbl).width;
-    if(lx+tw>W) lx=b.x-tw-8;
+    if(lx+tw>W) lx=b.x-tw-6;
     ctx.fillStyle=col;
     ctx.fillText(lbl,lx,ly);
   }
